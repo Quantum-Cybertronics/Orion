@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+
 app = FastAPI(
     title="ORION",
     description="Portable, private, cross-platform AI assistant",

@@ -227,7 +227,7 @@ data/
 logs/
 
 # Local AI models
-models/
+/models/
 *.gguf
 *.ggml
 

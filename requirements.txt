@@ -3,3 +3,6 @@ uvicorn[standard]
 pydantic
 pwdlib[argon2]
 itsdangerous
+sqlalchemy
+pytest
+alembic
