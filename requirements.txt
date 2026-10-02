@@ -6,3 +6,4 @@ itsdangerous
 sqlalchemy
 pytest
 alembic
+httpx2
