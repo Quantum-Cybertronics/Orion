@@ -2,12 +2,11 @@ import uuid
 
 from sqlalchemy import select
 
-from app.backend.database import SessionLocal
 from app.backend.models import Conversation, Message, User
 
 
-def test_user_conversation_message_relationship():
-    db = SessionLocal()
+def test_user_conversation_message_relationship(testing_session_local):
+    db = testing_session_local()
 
     try:
         username = f"test_{uuid.uuid4().hex[:8]}"
@@ -37,7 +36,6 @@ def test_user_conversation_message_relationship():
         db.add(message)
         db.commit()
 
-        # Reload the user from the database.
         saved_user = db.scalar(
             select(User).where(User.id == user.id)
         )

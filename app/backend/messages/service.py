@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.backend.ai.service import AIService
 
+from app.backend.ai.service import AIService
 from app.backend.models import Conversation, Message
 
 
@@ -34,19 +36,22 @@ def create_message(
     role: str,
     content: str,
 ) -> Message:
-    get_owned_conversation(
+    conversation = get_owned_conversation(
         db,
         user_id=user_id,
         conversation_id=conversation_id,
     )
 
     message = Message(
-        conversation_id=conversation_id,
+        conversation_id=conversation.id,
         role=role,
         content=content,
     )
 
     db.add(message)
+
+    conversation.updated_at = datetime.now(timezone.utc)
+
     db.commit()
     db.refresh(message)
 
@@ -74,17 +79,25 @@ def create_message_with_assistant(
     )
 
     db.add(user_message)
-    db.commit()
-    db.refresh(user_message)
+    db.flush()
 
-    assistant_content = ai_service.generate_reply(
-        [
-            {
-                "role": "user",
-                "content": content,
-            }
-        ]
+    history_statement = (
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.asc())
     )
+
+    history = list(db.scalars(history_statement).all())
+
+    ai_messages = [
+        {
+            "role": message.role,
+            "content": message.content,
+        }
+        for message in history
+    ]
+
+    assistant_content = ai_service.generate_reply(ai_messages)
 
     assistant_message = Message(
         conversation_id=conversation.id,
@@ -93,13 +106,15 @@ def create_message_with_assistant(
     )
 
     db.add(assistant_message)
+
+    conversation.updated_at = datetime.now(timezone.utc)
+
     db.commit()
+
+    db.refresh(user_message)
     db.refresh(assistant_message)
 
     return user_message, assistant_message
-
-
-
 
 
 def list_messages(
