@@ -244,3 +244,7 @@ dist/
 runtime/
 
 *.bin
+
+# IDE
+.idea/
+
