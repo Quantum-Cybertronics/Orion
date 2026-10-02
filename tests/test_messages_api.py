@@ -84,6 +84,8 @@ def test_create_message():
     assert data["role"] == "user"
     assert data["content"] == "Hello ORION"
 
+    print("CREATE MESSAGE RESPONSE:", response.status_code, response.json())
+
 
 def test_list_messages():
     client.cookies.clear()
@@ -100,14 +102,6 @@ def test_list_messages():
         },
     )
 
-    client.post(
-        f"/conversations/{conversation_id}/messages/",
-        json={
-            "role": "assistant",
-            "content": "Hello. I am ORION.",
-        },
-    )
-
     response = client.get(
         f"/conversations/{conversation_id}/messages/"
     )
@@ -120,7 +114,8 @@ def test_list_messages():
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "Hello ORION"
     assert messages[1]["role"] == "assistant"
-    assert messages[1]["content"] == "Hello. I am ORION."
+    assert messages[1]["content"] == "ORION received: Hello ORION"
+
 
 
 def test_user_cannot_create_message_in_another_users_conversation():
@@ -207,5 +202,47 @@ def test_messages_are_isolated_between_conversations():
 
     messages = response.json()
 
-    assert len(messages) == 1
+    assert len(messages) == 2
+
+    assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "Message A"
+
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "ORION received: Message A"
+
+
+def test_create_message_generates_assistant_response():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation(
+        "AI Test Conversation"
+    )
+
+    response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "role": "user",
+            "content": "Hello ORION",
+        },
+    )
+
+    assert response.status_code == 200
+
+    messages_response = client.get(
+        f"/conversations/{conversation_id}/messages/"
+    )
+
+    assert messages_response.status_code == 200
+
+    messages = messages_response.json()
+
+    assert len(messages) == 2
+
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "Hello ORION"
+
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "ORION received: Hello ORION"
+

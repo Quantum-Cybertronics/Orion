@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from app.backend.ai.service import AIService
 
 from app.backend.models import Conversation, Message
 
@@ -50,6 +51,55 @@ def create_message(
     db.refresh(message)
 
     return message
+
+
+def create_message_with_assistant(
+    db: Session,
+    user_id: str,
+    conversation_id: str,
+    role: str,
+    content: str,
+    ai_service: AIService,
+) -> tuple[Message, Message]:
+    conversation = get_owned_conversation(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+    user_message = Message(
+        conversation_id=conversation.id,
+        role=role,
+        content=content,
+    )
+
+    db.add(user_message)
+    db.commit()
+    db.refresh(user_message)
+
+    assistant_content = ai_service.generate_reply(
+        [
+            {
+                "role": "user",
+                "content": content,
+            }
+        ]
+    )
+
+    assistant_message = Message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content=assistant_content,
+    )
+
+    db.add(assistant_message)
+    db.commit()
+    db.refresh(assistant_message)
+
+    return user_message, assistant_message
+
+
+
 
 
 def list_messages(
