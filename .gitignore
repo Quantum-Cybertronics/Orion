@@ -216,3 +216,31 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ORION local secrets
+.env
+.env.*
+!.env.example
+
+# ORION local data
+data/
+logs/
+
+# Local AI models
+models/
+*.gguf
+*.ggml
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts
+build/
+dist/
+
+# Portable runtimes
+runtime/
+
+*.bin
