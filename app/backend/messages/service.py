@@ -36,22 +36,19 @@ def create_message(
     role: str,
     content: str,
 ) -> Message:
-    conversation = get_owned_conversation(
+    get_owned_conversation(
         db,
         user_id=user_id,
         conversation_id=conversation_id,
     )
 
     message = Message(
-        conversation_id=conversation.id,
+        conversation_id=conversation_id,
         role=role,
         content=content,
     )
 
     db.add(message)
-
-    conversation.updated_at = datetime.now(timezone.utc)
-
     db.commit()
     db.refresh(message)
 
@@ -79,17 +76,18 @@ def create_message_with_assistant(
     )
 
     db.add(user_message)
-    db.flush()
+    db.commit()
+    db.refresh(user_message)
 
-    history_statement = (
+    statement = (
         select(Message)
         .where(Message.conversation_id == conversation.id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.asc(), Message.id.asc())
     )
 
-    history = list(db.scalars(history_statement).all())
+    history = list(db.scalars(statement).all())
 
-    ai_messages = [
+    messages = [
         {
             "role": message.role,
             "content": message.content,
@@ -97,7 +95,7 @@ def create_message_with_assistant(
         for message in history
     ]
 
-    assistant_content = ai_service.generate_reply(ai_messages)
+    assistant_content = ai_service.generate_reply(messages)
 
     assistant_message = Message(
         conversation_id=conversation.id,
@@ -106,15 +104,12 @@ def create_message_with_assistant(
     )
 
     db.add(assistant_message)
-
-    conversation.updated_at = datetime.now(timezone.utc)
-
     db.commit()
-
-    db.refresh(user_message)
     db.refresh(assistant_message)
 
     return user_message, assistant_message
+
+
 
 
 def list_messages(

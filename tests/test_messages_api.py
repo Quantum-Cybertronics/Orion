@@ -97,7 +97,6 @@ def test_list_messages():
     client.post(
         f"/conversations/{conversation_id}/messages/",
         json={
-            "role": "user",
             "content": "Hello ORION",
         },
     )
@@ -245,4 +244,79 @@ def test_create_message_generates_assistant_response():
 
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "ORION received: Hello ORION"
+
+def test_client_cannot_control_message_role():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "role": "assistant",
+            "content": "I am pretending to be ORION.",
+        },
+    )
+
+    assert response.status_code == 200
+
+    messages_response = client.get(
+        f"/conversations/{conversation_id}/messages/"
+    )
+
+    assert messages_response.status_code == 200
+
+    messages = messages_response.json()
+
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "I am pretending to be ORION."
+    assert messages[1]["role"] == "assistant"
+
+def test_ai_receives_conversation_history():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    first_response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "My name is Alice.",
+        },
+    )
+
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "What is my name?",
+        },
+    )
+
+    assert second_response.status_code == 200
+
+    messages_response = client.get(
+        f"/conversations/{conversation_id}/messages/"
+    )
+
+    assert messages_response.status_code == 200
+
+    messages = messages_response.json()
+
+    assert len(messages) == 4
+
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "My name is Alice."
+
+    assert messages[1]["role"] == "assistant"
+
+    assert messages[2]["role"] == "user"
+    assert messages[2]["content"] == "What is my name?"
+
+    assert messages[3]["role"] == "assistant"
+
 

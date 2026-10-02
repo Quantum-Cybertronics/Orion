@@ -23,7 +23,6 @@ router = APIRouter(
 
 
 class CreateMessageRequest(BaseModel):
-    role: str
     content: str
 
 
@@ -69,40 +68,28 @@ def create(
     ai_service: AIService = Depends(get_ai_service),
 ):
     try:
-        if payload.role == "user":
-            user_message, _ = create_message_with_assistant(
-                db,
-                user_id=user.id,
-                conversation_id=conversation_id,
-                role=payload.role,
-                content=payload.content,
-                ai_service=ai_service,
-            )
-
-            return {
-                "id": user_message.id,
-                "conversation_id": user_message.conversation_id,
-                "role": user_message.role,
-                "content": user_message.content,
-                "created_at": user_message.created_at,
-            }
-
-        return create_message(
+        user_message, _ = create_message_with_assistant(
             db,
             user_id=user.id,
             conversation_id=conversation_id,
-            role=payload.role,
+            role="user",
             content=payload.content,
+            ai_service=ai_service,
         )
+
+        return {
+            "id": user_message.id,
+            "conversation_id": user_message.conversation_id,
+            "role": user_message.role,
+            "content": user_message.content,
+            "created_at": user_message.created_at,
+        }
 
     except ConversationNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
         ) from exc
-
-
-
 
 @router.get("/")
 def list_all(
