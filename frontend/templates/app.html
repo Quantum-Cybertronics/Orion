@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>ORION</title>
+
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+
+<body>
+
+<div class="app">
+
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">O</div>
+
+            <div>
+                <h1>ORION</h1>
+                <p>Private AI assistant</p>
+            </div>
+        </div>
+
+        <div class="user-area">
+            <span>{{ username }}</span>
+
+            <button id="logout-button">
+                Logout
+            </button>
+        </div>
+    </header>
+
+
+    <main class="workspace">
+
+        <aside class="sidebar">
+
+            <button id="new-conversation">
+                + New conversation
+            </button>
+
+            <div id="conversation-list">
+                <!-- Conversations will appear here -->
+            </div>
+
+        </aside>
+
+
+        <section class="chat">
+
+            <div id="messages" class="messages">
+
+                <div class="empty-state">
+                    <h2>Welcome to ORION</h2>
+                    <p>
+                        Start a conversation with your private AI assistant.
+                    </p>
+                </div>
+
+            </div>
+
+
+            <form id="message-form" class="message-form">
+
+                <input
+                    id="message-input"
+                    type="text"
+                    placeholder="Message ORION..."
+                    autocomplete="off"
+                    required
+                >
+
+                <button type="submit">
+                    Send
+                </button>
+
+            </form>
+
+        </section>
+
+    </main>
+
+</div>
+
+<script src="/static/app.js"></script>
+
+</body>
+</html>

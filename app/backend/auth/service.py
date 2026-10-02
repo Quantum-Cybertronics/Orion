@@ -1,7 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.backend.auth.security import hash_password
 from app.backend.auth.security import hash_password, verify_password
 
 from app.backend.models import User

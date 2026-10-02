@@ -1,0 +1,64 @@
+<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up — ORION</title> <link rel="stylesheet" href="/static/signup.css"> </head>
+<body> <main class="auth-page"> <section class="auth-card">
+    <div class="brand"> <div class="brand-mark">O</div> <div> <h1>ORION</h1> <p>Your private AI assistant</p> </div> </div>
+        <div class="auth-header">
+            <h2>Create your account</h2>
+            <p>Start using your private ORION workspace.</p>
+        </div>
+
+        <form id="signup-form">
+            <div class="field">
+                <label for="username">Username</label>
+                <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    autocomplete="username"
+                    placeholder="Choose a username"
+                    required
+                >
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
+                <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Create a password"
+                    required
+                >
+            </div>
+
+            <div class="field">
+                <label for="confirm-password">Confirm password</label>
+                <input
+                    id="confirm-password"
+                    name="confirm-password"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Enter your password again"
+                    required
+                >
+            </div>
+
+            <p id="error-message" class="message error" hidden></p>
+            <p id="success-message" class="message success" hidden></p>
+
+            <button id="signup-button" type="submit">
+                Create account
+            </button>
+        </form>
+
+        <p class="auth-switch">
+            Already have an account?
+            <a href="/login">Sign in</a>
+        </p>
+    </section>
+</main>
+
+<script src="/static/signup.js"></script>
+
+</body> </html>

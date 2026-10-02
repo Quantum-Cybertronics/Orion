@@ -1,0 +1,174 @@
+{
+box-sizing: border-box;
+}
+
+:root {
+color-scheme: dark;
+--background: #080b12;
+--card: #101621;
+--border: #202938;
+--text: #f5f7fa;
+--muted: #8d98a8;
+--accent: #6ea8fe;
+--accent-hover: #8ab8ff;
+--error: #ff6b6b;
+}
+
+body {
+margin: 0;
+min-height: 100vh;
+background:
+radial-gradient(
+circle at top,
+rgba(70, 110, 180, 0.16),
+transparent 40%
+),
+var(--background);
+color: var(--text);
+font-family:
+Inter,
+ui-sans-serif,
+system-ui,
+-apple-system,
+BlinkMacSystemFont,
+"Segoe UI",
+sans-serif;
+}
+
+.login-page {
+min-height: 100vh;
+display: flex;
+align-items: center;
+justify-content: center;
+padding: 24px;
+}
+
+.login-card {
+width: 100%;
+max-width: 420px;
+padding: 40px;
+background: rgba(16, 22, 33, 0.94);
+border: 1px solid var(--border);
+border-radius: 18px;
+box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.brand {
+text-align: center;
+margin-bottom: 36px;
+}
+
+.brand-mark {
+width: 54px;
+height: 54px;
+margin: 0 auto 14px;
+display: flex;
+align-items: center;
+justify-content: center;
+border-radius: 14px;
+background: linear-gradient(135deg, #5d8fe8, #8a6ee8);
+color: white;
+font-size: 25px;
+font-weight: 700;
+}
+
+.brand h1 {
+margin: 0;
+letter-spacing: 0.18em;
+font-size: 28px;
+}
+
+.brand p {
+margin: 10px 0 0;
+color: var(--muted);
+font-size: 14px;
+}
+
+.field {
+margin-bottom: 20px;
+}
+
+.field label {
+display: block;
+margin-bottom: 8px;
+font-size: 14px;
+font-weight: 500;
+}
+
+.field input {
+width: 100%;
+height: 46px;
+padding: 0 14px;
+border: 1px solid var(--border);
+border-radius: 9px;
+outline: none;
+background: #0b1018;
+color: var(--text);
+font-size: 15px;
+transition:
+border-color 0.15s ease,
+box-shadow 0.15s ease;
+}
+
+.field input:focus {
+border-color: var(--accent);
+box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.12);
+}
+
+button {
+width: 100%;
+height: 46px;
+margin-top: 4px;
+border: 0;
+border-radius: 9px;
+background: var(--accent);
+color: #07101f;
+font-size: 15px;
+font-weight: 700;
+cursor: pointer;
+transition:
+background 0.15s ease,
+transform 0.05s ease;
+}
+
+button:hover {
+background: var(--accent-hover);
+}
+
+button:active {
+transform: translateY(1px);
+}
+
+button:disabled {
+cursor: not-allowed;
+opacity: 0.65;
+}
+
+.error {
+margin: 0 0 16px;
+color: var(--error);
+font-size: 14px;
+line-height: 1.4;
+}
+
+.register-link {
+margin: 24px 0 0;
+text-align: center;
+color: var(--muted);
+font-size: 14px;
+}
+
+.register-link a {
+color: var(--accent);
+text-decoration: none;
+}
+
+.register-link a:hover {
+text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+.login-card {
+padding: 30px 24px;
+}
+}

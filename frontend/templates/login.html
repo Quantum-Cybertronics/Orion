@@ -1,0 +1,42 @@
+<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>ORION — Login</title> <link rel="stylesheet" href="/static/login.css"> </head> <body> <main class="login-page"> <section class="login-card"> <div class="brand"> <div class="brand-mark">O</div> <h1>ORION</h1> <p>Private. Portable. Intelligent.</p> </div>
+        <form id="login-form">
+            <div class="field">
+                <label for="username">Username</label>
+                <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    autocomplete="username"
+                    required
+                >
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
+                <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                >
+            </div>
+
+            <p id="login-error" class="error" hidden></p>
+
+            <button id="login-button" type="submit">
+                <span id="button-text">Login</span>
+                <span id="button-loading" hidden>Signing in...</span>
+            </button>
+        </form>
+
+        <p class="register-link">
+            Don't have an account?
+            <a href="/signup">Create one</a>
+        </p>
+    </section>
+</main>
+
+<script src="/static/login.js"></script>
+
+</body> </html>

@@ -7,3 +7,4 @@ sqlalchemy
 pytest
 alembic
 httpx2
+jinja2
