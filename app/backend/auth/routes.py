@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -8,11 +8,11 @@ from app.backend.auth.service import (
     authenticate_user,
     create_user,
 )
+from app.backend.auth.dependencies import get_current_user
 from app.backend.auth.session import (
     SESSION_COOKIE_NAME,
     SESSION_MAX_AGE,
     create_session,
-    get_user_id,
 )
 from app.backend.database import get_db
 from app.backend.models import User
@@ -90,38 +90,12 @@ def login(
     }
 
 @router.get("/me")
-def me(
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    session_token = request.cookies.get(SESSION_COOKIE_NAME)
-
-    if not session_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated.",
-        )
-
-    user_id = get_user_id(session_token)
-
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated.",
-        )
-
-    user = db.get(User, user_id)
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated.",
-        )
-
+def me(user: User = Depends(get_current_user)):
     return {
         "id": user.id,
         "username": user.username,
     }
+
 
 @router.post("/logout")
 def logout(response: Response):

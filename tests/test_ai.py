@@ -8,13 +8,26 @@ from app.backend.ai.providers import EchoAIProvider
 class FakeAIProvider(AIProvider):
     def __init__(self):
         self.received_messages = None
+        self.received_title_content = None
 
-    def generate(
-        self,
-        messages: list[dict[str, str]],
-    ) -> str:
+    def generate(self, messages):
         self.received_messages = messages
         return "Hello from the test provider."
+
+    def generate_title(self, content):
+        self.received_title_content = content
+        return "Test title"
+
+
+def test_ai_service_generates_title():
+    provider = FakeAIProvider()
+    service = AIService(provider)
+
+    result = service.generate_title("Hello ORION")
+
+    assert result == "Test title"
+    assert provider.received_title_content == "Hello ORION"
+
 
 
 def test_ai_provider_interface_can_generate():

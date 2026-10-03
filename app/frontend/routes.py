@@ -1,14 +1,9 @@
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
 
-from app.backend.auth.session import (
-    SESSION_COOKIE_NAME,
-    get_user_id,
-)
-from app.backend.database import SessionLocal
+from app.backend.auth.dependencies import get_current_user
 from app.backend.models import User
 
 
@@ -39,40 +34,14 @@ async def signup_page(request: Request):
 
 
 @router.get("/app")
-async def app_page(request: Request):
-    session_token = request.cookies.get(SESSION_COOKIE_NAME)
-
-    if not session_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated.",
-        )
-
-    user_id = get_user_id(session_token)
-
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated.",
-        )
-
-    db: Session = SessionLocal()
-
-    try:
-        user = db.get(User, user_id)
-
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated.",
-            )
-
-        return templates.TemplateResponse(
-            request=request,
-            name="app.html",
-            context={
-                "username": user.username,
-            },
-        )
-    finally:
-        db.close()
+def app_page(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="app.html",
+        context={
+            "username": user.username,
+        },
+    )

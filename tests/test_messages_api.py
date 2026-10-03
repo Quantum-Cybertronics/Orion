@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi.testclient import TestClient
-
+from app.backend.ai.service import AIService
 from app.backend.main import app
 
 
@@ -37,7 +37,7 @@ def register_and_login(
     assert login_response.status_code == 200
 
 
-def create_conversation(title: str = "Test conversation") -> str:
+def create_conversation(title: str = "New conversation") -> str:
     response = client.post(
         "/conversations/",
         json={"title": title},
@@ -114,7 +114,6 @@ def test_list_messages():
     assert messages[0]["content"] == "Hello ORION"
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "ORION received: Hello ORION"
-
 
 
 def test_user_cannot_create_message_in_another_users_conversation():
@@ -245,6 +244,7 @@ def test_create_message_generates_assistant_response():
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "ORION received: Hello ORION"
 
+
 def test_client_cannot_control_message_role():
     client.cookies.clear()
 
@@ -274,8 +274,23 @@ def test_client_cannot_control_message_role():
     assert messages[0]["content"] == "I am pretending to be ORION."
     assert messages[1]["role"] == "assistant"
 
-def test_ai_receives_conversation_history():
+
+def test_ai_receives_conversation_history(monkeypatch):
     client.cookies.clear()
+
+    received_histories = []
+
+    original_generate_reply = AIService.generate_reply
+
+    def capture_history(self, messages):
+        received_histories.append(messages)
+        return original_generate_reply(self, messages)
+
+    monkeypatch.setattr(
+        AIService,
+        "generate_reply",
+        capture_history,
+    )
 
     register_and_login(unique_username())
 
@@ -299,6 +314,28 @@ def test_ai_receives_conversation_history():
 
     assert second_response.status_code == 200
 
+    assert received_histories[0] == [
+        {
+            "role": "user",
+            "content": "My name is Alice.",
+        },
+    ]
+
+    assert received_histories[1] == [
+        {
+            "role": "user",
+            "content": "My name is Alice.",
+        },
+        {
+            "role": "assistant",
+            "content": received_histories[1][1]["content"],
+        },
+        {
+            "role": "user",
+            "content": "What is my name?",
+        },
+    ]
+
     messages_response = client.get(
         f"/conversations/{conversation_id}/messages/"
     )
@@ -320,3 +357,144 @@ def test_ai_receives_conversation_history():
     assert messages[3]["role"] == "assistant"
 
 
+def test_first_user_message_generates_conversation_title():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "How do I learn Python?",
+        },
+    )
+
+    assert response.status_code == 200
+
+    conversation_response = client.get(
+        f"/conversations/{conversation_id}"
+    )
+
+    assert conversation_response.status_code == 200
+
+    conversation = conversation_response.json()
+
+    assert conversation["title"] == "How do I learn Python?"
+
+
+def test_conversation_title_is_not_overwritten():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    first_response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "My first topic",
+        },
+    )
+
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "My completely different second topic",
+        },
+    )
+
+    assert second_response.status_code == 200
+
+    conversation_response = client.get(
+        f"/conversations/{conversation_id}"
+    )
+
+    assert conversation_response.status_code == 200
+
+    conversation = conversation_response.json()
+
+    assert conversation["title"] == "My first topic"
+
+
+def test_conversation_title_trims_whitespace():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "   How do I learn Python?   ",
+        },
+    )
+
+    assert response.status_code == 200
+
+    conversation_response = client.get(
+        f"/conversations/{conversation_id}"
+    )
+
+    assert conversation_response.status_code == 200
+
+    conversation = conversation_response.json()
+
+    assert conversation["title"] == "How do I learn Python?"
+
+
+def test_conversation_title_collapses_whitespace():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": "How    do   I   learn   Python?",
+        },
+    )
+
+    assert response.status_code == 200
+
+    conversation_response = client.get(
+        f"/conversations/{conversation_id}"
+    )
+
+    conversation = conversation_response.json()
+
+    assert conversation["title"] == "How do I learn Python?"
+
+
+def test_conversation_title_is_limited_to_80_characters():
+    client.cookies.clear()
+
+    register_and_login(unique_username())
+
+    conversation_id = create_conversation()
+
+    long_message = "A" * 200
+
+    response = client.post(
+        f"/conversations/{conversation_id}/messages/",
+        json={
+            "content": long_message,
+        },
+    )
+
+    assert response.status_code == 200
+
+    conversation_response = client.get(
+        f"/conversations/{conversation_id}"
+    )
+
+    conversation = conversation_response.json()
+
+    assert len(conversation["title"]) == 80
+    assert conversation["title"] == "A" * 80

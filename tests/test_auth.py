@@ -10,7 +10,6 @@ from app.backend.auth.service import (
     create_user,
 )
 
-from app.backend.database import SessionLocal
 from app.backend.models import User
 
 
@@ -24,8 +23,8 @@ def test_password_hashing():
     assert not verify_password("WrongPassword!", hashed_password)
 
 
-def test_create_user():
-    db = SessionLocal()
+def test_create_user(testing_session_local):
+    db = testing_session_local()
     username = f"test_{uuid.uuid4().hex[:8]}"
 
     try:
@@ -55,8 +54,8 @@ def test_create_user():
         db.close()
 
 
-def test_duplicate_username_rejected():
-    db = SessionLocal()
+def test_duplicate_username_rejected(testing_session_local):
+    db = testing_session_local()
     username = f"test_{uuid.uuid4().hex[:8]}"
 
     try:
@@ -90,8 +89,8 @@ def test_duplicate_username_rejected():
 
         db.close()
 
-def test_authenticate_user():
-    db = SessionLocal()
+def test_authenticate_user(testing_session_local):
+    db = testing_session_local()
     username = f"test_{uuid.uuid4().hex[:8]}"
     password = "TestPassword123!"
 
@@ -122,8 +121,8 @@ def test_authenticate_user():
         db.close()
 
 
-def test_authenticate_user_rejects_wrong_password():
-    db = SessionLocal()
+def test_authenticate_user_rejects_wrong_password(testing_session_local):
+    db = testing_session_local()
     username = f"test_{uuid.uuid4().hex[:8]}"
 
     try:
@@ -158,8 +157,8 @@ def test_authenticate_user_rejects_wrong_password():
         db.close()
 
 
-def test_authenticate_user_rejects_unknown_username():
-    db = SessionLocal()
+def test_authenticate_user_rejects_unknown_username(testing_session_local):
+    db = testing_session_local()
 
     try:
         try:

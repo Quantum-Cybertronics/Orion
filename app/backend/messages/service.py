@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.backend.ai.service import AIService
@@ -9,6 +9,22 @@ from app.backend.models import Conversation, Message
 
 class ConversationNotFoundError(Exception):
     pass
+
+
+MAX_CONVERSATION_TITLE_LENGTH = 80
+
+# Insertion order. created_at alone can tie on platforms with a coarse clock
+# (Windows ~15 ms), and UUID ids are random, so rowid is the stable tiebreaker.
+MESSAGE_ORDER = (Message.created_at.asc(), text("messages.rowid"))
+
+
+def fallback_conversation_title(content: str) -> str:
+    title = " ".join(content.split())
+
+    if len(title) > MAX_CONVERSATION_TITLE_LENGTH:
+        title = title[:MAX_CONVERSATION_TITLE_LENGTH].rstrip()
+
+    return title
 
 
 def get_owned_conversation(
@@ -29,11 +45,10 @@ def get_owned_conversation(
     return conversation
 
 
-def create_message(
+def create_user_message(
     db: Session,
     user_id: str,
     conversation_id: str,
-    role: str,
     content: str,
 ) -> Message:
     get_owned_conversation(
@@ -44,7 +59,7 @@ def create_message(
 
     message = Message(
         conversation_id=conversation_id,
-        role=role,
+        role="user",
         content=content,
     )
 
@@ -55,61 +70,102 @@ def create_message(
     return message
 
 
-def create_message_with_assistant(
+def begin_user_turn(
     db: Session,
     user_id: str,
     conversation_id: str,
-    role: str,
     content: str,
     ai_service: AIService,
-) -> tuple[Message, Message]:
+) -> tuple[Message, list[dict[str, str]]]:
+    """Save the user's message and return it with the conversation history.
+
+    The history (oldest first, including the new message) is what gets sent
+    to the AI. Sets the conversation title from the first message.
+    """
     conversation = get_owned_conversation(
         db,
         user_id=user_id,
         conversation_id=conversation_id,
     )
 
+    is_first_message = len(conversation.messages) == 0
+
     user_message = Message(
         conversation_id=conversation.id,
-        role=role,
+        role="user",
         content=content,
     )
 
     db.add(user_message)
+
+    if is_first_message and conversation.title == "New conversation":
+        try:
+            conversation.title = ai_service.generate_title(content)
+        except Exception:
+            conversation.title = fallback_conversation_title(content)
+
     db.commit()
     db.refresh(user_message)
 
     statement = (
         select(Message)
         .where(Message.conversation_id == conversation.id)
-        .order_by(Message.created_at.asc(), Message.id.asc())
+        .order_by(*MESSAGE_ORDER)
     )
 
-    history = list(db.scalars(statement).all())
-
-    messages = [
+    history = [
         {
             "role": message.role,
             "content": message.content,
         }
-        for message in history
+        for message in db.scalars(statement).all()
     ]
 
-    assistant_content = ai_service.generate_reply(messages)
+    return user_message, history
 
+
+def save_assistant_message(
+    db: Session,
+    conversation_id: str,
+    content: str,
+) -> Message:
     assistant_message = Message(
-        conversation_id=conversation.id,
+        conversation_id=conversation_id,
         role="assistant",
-        content=assistant_content,
+        content=content,
     )
 
     db.add(assistant_message)
     db.commit()
     db.refresh(assistant_message)
 
+    return assistant_message
+
+
+def create_message_with_assistant(
+    db: Session,
+    user_id: str,
+    conversation_id: str,
+    content: str,
+    ai_service: AIService,
+) -> tuple[Message, Message]:
+    user_message, history = begin_user_turn(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        content=content,
+        ai_service=ai_service,
+    )
+
+    assistant_content = ai_service.generate_reply(history)
+
+    assistant_message = save_assistant_message(
+        db,
+        conversation_id=conversation_id,
+        content=assistant_content,
+    )
+
     return user_message, assistant_message
-
-
 
 
 def list_messages(
@@ -126,7 +182,7 @@ def list_messages(
     statement = (
         select(Message)
         .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
+        .order_by(*MESSAGE_ORDER)
     )
 
     return list(db.scalars(statement).all())

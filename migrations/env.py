@@ -5,7 +5,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from app.backend.database import Base
+from app.backend.database import DATABASE_URL, Base
 from app.backend import models
 
 
@@ -16,7 +16,15 @@ config = context.config
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Don't silence uvicorn/app loggers when migrations run inside the server.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+
+# One source of truth for the database location (works for the CLI too).
+# '%' must be doubled because Alembic's config uses ConfigParser interpolation.
+config.set_main_option(
+    "sqlalchemy.url",
+    (config.attributes.get("database_url") or DATABASE_URL).replace("%", "%%"),
+)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

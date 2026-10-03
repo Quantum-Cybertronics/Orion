@@ -1,18 +1,12 @@
-import os
-import time
-
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+
+from app.backend.config import load_session_secret
 
 
 SESSION_COOKIE_NAME = "orion_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 
-_SESSION_SECRET = os.getenv(
-    "ORION_SESSION_SECRET",
-    "development-only-change-this-secret",
-)
-
-_serializer = URLSafeTimedSerializer(_SESSION_SECRET)
+_serializer = URLSafeTimedSerializer(load_session_secret())
 
 
 def create_session(user_id: str) -> str:

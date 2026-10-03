@@ -69,3 +69,14 @@ def delete_conversation(
 
     db.delete(conversation)
     db.commit()
+
+# def generate_conversation_title(content: str) -> str:
+#     title = " ".join(content.strip().split())
+#
+#     if not title:
+#         return "New conversation"
+#
+#     if len(title) > 60:
+#         title = title[:57].rstrip() + "..."
+#
+#     return title
