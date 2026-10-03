@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from app.backend.ai import llama_server
 from app.backend.ai.base import AIProviderError
 from app.backend.ai.llama_provider import (
     LlamaServerProvider,
+    describe_now,
     estimate_tokens,
     fit_to_context,
 )
@@ -285,3 +287,34 @@ def test_fit_always_keeps_newest_message_even_if_too_big():
     messages = [message("user", 10), message("user", 100_000)]
 
     assert fit_to_context(messages, 50) == [messages[-1]]
+
+
+# ------------------------------------------------------------ system prompt
+
+FIXED_NOW = datetime(2026, 10, 3, 14, 5, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+
+
+def test_describe_now_formats_date_time_and_offset():
+    assert describe_now(FIXED_NOW) == "Saturday, 03 October 2026, 14:05 (UTC+05:30)"
+
+
+def test_system_prompt_has_date_and_no_live_data_notice(manager):
+    provider = LlamaServerProvider(manager(), clock=lambda: FIXED_NOW)
+
+    prepared = provider._prepare([{"role": "user", "content": "what day is it?"}])
+
+    assert prepared[0]["role"] == "system"
+    assert "Saturday, 03 October 2026, 14:05 (UTC+05:30)" in prepared[0]["content"]
+    assert "no internet access" in prepared[0]["content"]
+    assert prepared[1] == {"role": "user", "content": "what day is it?"}
+
+
+def test_clock_is_read_per_request(manager):
+    times = iter([FIXED_NOW, FIXED_NOW + timedelta(days=1)])
+    provider = LlamaServerProvider(manager(), clock=lambda: next(times))
+    message = [{"role": "user", "content": "hi"}]
+
+    first = provider._prepare(message)[0]["content"]
+    second = provider._prepare(message)[0]["content"]
+
+    assert "03 October" in first and "04 October" in second

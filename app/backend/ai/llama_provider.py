@@ -7,7 +7,8 @@ here will also fit the OpenRouter provider later.
 import http.client
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import datetime
 
 from app.backend.ai.base import AIProvider, AIProviderError
 from app.backend.ai.llama_server import LlamaServerError, LlamaServerManager
@@ -16,6 +17,21 @@ DEFAULT_SYSTEM_PROMPT = (
     "You are ORION, a helpful, honest and private AI assistant running "
     "locally on the user's own device. Answer clearly and concisely."
 )
+
+NO_LIVE_DATA_NOTICE = (
+    "You have no internet access and no live data. You cannot know the "
+    "current weather, news, prices, sports scores or events after your "
+    "training. If asked, say you cannot check instead of guessing. You also "
+    "do not know the user's location or time zone unless they tell you."
+)
+
+
+def describe_now(now: datetime) -> str:
+    """e.g. ``Saturday, 03 October 2026, 14:05 (UTC+05:30)``."""
+    offset = now.strftime("%z")
+    offset = f"{offset[:3]}:{offset[3:]}" if offset else "local time"
+
+    return f"{now:%A, %d %B %Y, %H:%M} (UTC{offset})"
 
 # Per-message overhead added by chat templates (role markers etc.).
 MESSAGE_OVERHEAD_TOKENS = 8
@@ -69,6 +85,7 @@ class LlamaServerProvider(AIProvider):
         temperature: float = 0.7,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         request_timeout: float = 600.0,
+        clock: Callable[[], datetime] = lambda: datetime.now().astimezone(),
     ):
         self.manager = manager
         self.ctx_size = ctx_size
@@ -76,6 +93,7 @@ class LlamaServerProvider(AIProvider):
         self.temperature = temperature
         self.system_prompt = system_prompt
         self.request_timeout = request_timeout
+        self._clock = clock
 
         # One model, one generation at a time; others queue here.
         self._generation_lock = threading.Lock()
@@ -111,7 +129,13 @@ class LlamaServerProvider(AIProvider):
         with_system = list(messages)
 
         if not any(m["role"] == "system" for m in with_system):
-            with_system.insert(0, {"role": "system", "content": self.system_prompt})
+            system_text = (
+                f"{self.system_prompt} "
+                f"The current date and time on this device is "
+                f"{describe_now(self._clock())}. {NO_LIVE_DATA_NOTICE}"
+            )
+
+            with_system.insert(0, {"role": "system", "content": system_text})
 
         reply_reserve = min(self.max_tokens, self.ctx_size // 2)
 
