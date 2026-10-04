@@ -24,6 +24,7 @@ from app.backend.ai.llama_server import (
 )
 from app.backend.ai.providers import EchoAIProvider, UnavailableAIProvider
 from app.backend.ai.service import AIService
+from app.backend.ai.tokens import FileBudget, file_budget
 from app.backend.config import BASE_DIR, DATA_DIR
 
 logger = logging.getLogger("orion.ai")
@@ -32,7 +33,7 @@ logger = logging.getLogger("orion.ai")
 @dataclass(frozen=True)
 class AISettings:
     provider: str = "auto"
-    ctx_size: int = 4096
+    ctx_size: int = 8192
     max_tokens: int = 1024
     temperature: float = 0.7
     threads: int | None = None
@@ -55,7 +56,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> AISettings:
 
     return AISettings(
         provider=provider,
-        ctx_size=number("ORION_LLAMA_CTX", 4096, int),
+        ctx_size=number("ORION_LLAMA_CTX", 8192, int),
         max_tokens=number("ORION_MAX_REPLY_TOKENS", 1024, int),
         temperature=number("ORION_TEMPERATURE", 0.7, float),
         threads=number("ORION_LLAMA_THREADS", None, int),
@@ -73,6 +74,7 @@ class AIRuntime:
         manager: LlamaServerManager | None = None,
         model: Path | None = None,
         note: str | None = None,
+        settings: AISettings | None = None,
     ):
         self.provider = provider
         self.kind = kind  # "llama" | "echo" | "unavailable"
@@ -80,6 +82,11 @@ class AIRuntime:
         self.model = model
         self.note = note
         self.service = AIService(provider)
+        self.settings = settings or AISettings()
+
+    def file_budget(self) -> FileBudget:
+        """How much attached-file text fits in the model's context window."""
+        return file_budget(self.settings.ctx_size, self.settings.max_tokens)
 
     def start(self) -> None:
         """Begin loading the model in the background (does not block)."""
@@ -121,7 +128,9 @@ def build_runtime(
     data_dir: Path = DATA_DIR,
 ) -> AIRuntime:
     if settings.provider == "echo":
-        return AIRuntime(EchoAIProvider(), "echo", note="Echo mode (no AI model).")
+        return AIRuntime(
+            EchoAIProvider(), "echo", note="Echo mode (no AI model).", settings=settings
+        )
 
     binary = find_server_binary(base_dir, settings.server_path)
     model = find_model(base_dir, settings.model_path)
@@ -141,10 +150,14 @@ def build_runtime(
 
         if settings.provider == "llama":
             logger.error(reason)
-            return AIRuntime(UnavailableAIProvider(reason), "unavailable", note=reason)
+            return AIRuntime(
+                UnavailableAIProvider(reason), "unavailable", note=reason, settings=settings
+            )
 
         logger.warning("%s Falling back to echo mode.", reason)
-        return AIRuntime(EchoAIProvider(), "echo", note=f"Echo mode. {reason}")
+        return AIRuntime(
+            EchoAIProvider(), "echo", note=f"Echo mode. {reason}", settings=settings
+        )
 
     manager = LlamaServerManager(
         binary,
@@ -162,7 +175,9 @@ def build_runtime(
         temperature=settings.temperature,
     )
 
-    return AIRuntime(provider, "llama", manager=manager, model=model)
+    return AIRuntime(
+        provider, "llama", manager=manager, model=model, settings=settings
+    )
 
 
 _runtime: AIRuntime | None = None

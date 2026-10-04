@@ -8,7 +8,7 @@ from app.backend.ai import llama_server
 from app.backend.ai.base import AIProviderError
 from app.backend.ai.llama_provider import (
     LlamaServerProvider,
-    describe_now,
+    describe_today,
     estimate_tokens,
     fit_to_context,
 )
@@ -229,6 +229,41 @@ def test_provider_keeps_existing_system_prompt(manager):
     assert provider.generate(messages) == "echo[2]: hi"
 
 
+def test_caller_system_messages_are_merged_after_orions_own(manager):
+    provider = LlamaServerProvider(manager(), clock=lambda: FIXED_NOW)
+    messages = [
+        {"role": "system", "content": "FILE ONE TEXT"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"},
+    ]
+
+    prepared = provider._prepare(messages)
+    system = [m for m in prepared if m["role"] == "system"]
+
+    assert len(system) == 1
+    assert system[0]["content"].startswith("You are ORION")
+    assert system[0]["content"].endswith("FILE ONE TEXT")
+    assert [m["role"] for m in prepared] == ["system", "user", "assistant", "user"]
+
+
+def test_attached_file_text_survives_history_trimming(manager):
+    provider = LlamaServerProvider(manager(), ctx_size=1500, max_tokens=200)
+    history = [{"role": "system", "content": "THE-STORY " * 100}]
+
+    for index in range(30):
+        history.append({"role": "user", "content": f"q{index} " + "x" * 150})
+        history.append({"role": "assistant", "content": "a " + "y" * 150})
+
+    history.append({"role": "user", "content": "latest question"})
+
+    prepared = provider._prepare(history)
+
+    assert "THE-STORY" in prepared[0]["content"]
+    assert prepared[-1]["content"] == "latest question"
+    assert len(prepared) < len(history)
+
+
 def test_provider_trims_old_history_to_fit_context(manager):
     provider = LlamaServerProvider(manager(), ctx_size=600, max_tokens=200)
     history = []
@@ -294,8 +329,8 @@ def test_fit_always_keeps_newest_message_even_if_too_big():
 FIXED_NOW = datetime(2026, 10, 3, 14, 5, tzinfo=timezone(timedelta(hours=5, minutes=30)))
 
 
-def test_describe_now_formats_date_time_and_offset():
-    assert describe_now(FIXED_NOW) == "Saturday, 03 October 2026, 14:05 (UTC+05:30)"
+def test_describe_today_is_date_only_with_offset():
+    assert describe_today(FIXED_NOW) == "Saturday, 03 October 2026 (UTC+05:30)"
 
 
 def test_system_prompt_has_date_and_no_live_data_notice(manager):
@@ -304,8 +339,10 @@ def test_system_prompt_has_date_and_no_live_data_notice(manager):
     prepared = provider._prepare([{"role": "user", "content": "what day is it?"}])
 
     assert prepared[0]["role"] == "system"
-    assert "Saturday, 03 October 2026, 14:05 (UTC+05:30)" in prepared[0]["content"]
+    assert "Saturday, 03 October 2026 (UTC+05:30)" in prepared[0]["content"]
+    assert "14:05" not in prepared[0]["content"]   # time of day would break prompt caching
     assert "no internet access" in prepared[0]["content"]
+    assert "time of day" in prepared[0]["content"]
     assert prepared[1] == {"role": "user", "content": "what day is it?"}
 
 

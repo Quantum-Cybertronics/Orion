@@ -12,6 +12,7 @@ from datetime import datetime
 
 from app.backend.ai.base import AIProvider, AIProviderError
 from app.backend.ai.llama_server import LlamaServerError, LlamaServerManager
+from app.backend.ai.tokens import estimate_tokens
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are ORION, a helpful, honest and private AI assistant running "
@@ -26,20 +27,20 @@ NO_LIVE_DATA_NOTICE = (
 )
 
 
-def describe_now(now: datetime) -> str:
-    """e.g. ``Saturday, 03 October 2026, 14:05 (UTC+05:30)``."""
+def describe_today(now: datetime) -> str:
+    """e.g. ``Saturday, 03 October 2026 (UTC+05:30)``.
+
+    Deliberately date-only: the time of day would change the start of the
+    prompt every minute and force the model to re-read any attached files
+    on every single message.
+    """
     offset = now.strftime("%z")
     offset = f"{offset[:3]}:{offset[3:]}" if offset else "local time"
 
-    return f"{now:%A, %d %B %Y, %H:%M} (UTC{offset})"
+    return f"{now:%A, %d %B %Y} (UTC{offset})"
 
 # Per-message overhead added by chat templates (role markers etc.).
 MESSAGE_OVERHEAD_TOKENS = 8
-
-
-def estimate_tokens(text: str) -> int:
-    """Cheap, deliberately pessimistic token estimate (no tokenizer needed)."""
-    return len(text) // 3 + 1
 
 
 def fit_to_context(
@@ -126,20 +127,24 @@ class LlamaServerProvider(AIProvider):
     # -- internals ---------------------------------------------------------
 
     def _prepare(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
-        with_system = list(messages)
+        # ORION's own prompt always comes first; any system messages the
+        # caller supplied (e.g. attached-file text) are merged in after it.
+        extra_system = [m["content"] for m in messages if m["role"] == "system"]
+        turns = [m for m in messages if m["role"] != "system"]
 
-        if not any(m["role"] == "system" for m in with_system):
-            system_text = (
-                f"{self.system_prompt} "
-                f"The current date and time on this device is "
-                f"{describe_now(self._clock())}. {NO_LIVE_DATA_NOTICE}"
-            )
+        system_text = (
+            f"{self.system_prompt} "
+            f"Today's date on this device is {describe_today(self._clock())}. "
+            f"You do not know the current time of day. {NO_LIVE_DATA_NOTICE}"
+        )
 
-            with_system.insert(0, {"role": "system", "content": system_text})
+        if extra_system:
+            system_text += "\n\n" + "\n\n".join(extra_system)
 
+        prepared = [{"role": "system", "content": system_text}] + turns
         reply_reserve = min(self.max_tokens, self.ctx_size // 2)
 
-        return fit_to_context(with_system, self.ctx_size - reply_reserve)
+        return fit_to_context(prepared, self.ctx_size - reply_reserve)
 
     def _stream_completion(
         self,

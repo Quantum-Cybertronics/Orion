@@ -11,6 +11,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 SESSION_SECRET_FILENAME = "session_secret"
 
+# Largest file a user may upload (ORION_MAX_UPLOAD_MB, default 5).
+MAX_UPLOAD_BYTES = int(float(os.getenv("ORION_MAX_UPLOAD_MB") or 5) * 1024 * 1024)
+
 
 def load_session_secret(data_dir: Path = DATA_DIR) -> str:
     """Return the key used to sign session cookies.

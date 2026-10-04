@@ -5,10 +5,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.backend.ai.routes import router as ai_router
 from app.backend.ai.runtime import get_runtime
+from app.backend.attachments.routes import router as attachments_router
 from app.backend.auth.routes import router as auth_router
 from app.backend.conversations.routes import router as conversations_router
+from app.backend.database import engine
 from app.backend.migrations_runner import run_migrations
 from app.backend.messages.routes import router as messages_router
+from app.backend.storage import compact_on_shutdown
 from app.frontend.routes import router as frontend_router
 
 
@@ -27,6 +30,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         runtime.stop()
+        compact_on_shutdown(engine)
 
 
 app = FastAPI(
@@ -46,6 +50,7 @@ app.mount(
 
 app.include_router(auth_router)
 app.include_router(ai_router)
+app.include_router(attachments_router)
 app.include_router(conversations_router)
 app.include_router(messages_router)
 app.include_router(frontend_router)

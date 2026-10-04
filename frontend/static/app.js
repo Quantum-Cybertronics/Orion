@@ -7,9 +7,20 @@ const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const sendButton = document.getElementById("send-button");
 const aiBanner = document.getElementById("ai-banner");
+const chatElement = document.getElementById("chat");
+const attachButton = document.getElementById("attach-button");
+const fileInput = document.getElementById("file-input");
+const fileStrip = document.getElementById("file-strip");
+const clearToggle = document.getElementById("clear-toggle");
+const clearPanel = document.getElementById("clear-panel");
+const clearAge = document.getElementById("clear-age");
+const clearOlder = document.getElementById("clear-older");
+const clearAll = document.getElementById("clear-all");
+const clearStatus = document.getElementById("clear-status");
 
 let activeConversationId = null;
 let streamController = null; // set while a reply is streaming
+let CONFIRM_MS = 3000; // how long a "click again to confirm" button waits
 
 
 async function apiRequest(url, options = {}) {
@@ -92,18 +103,36 @@ async function loadConversations() {
     conversationList.innerHTML = "";
 
     for (const conversation of conversations) {
+        const row = document.createElement("div");
+
+        row.className = "conversation-row";
+
         const button = document.createElement("button");
 
         button.type = "button";
         button.className = "conversation-item";
         button.textContent = conversation.title;
+        button.title = conversation.title;
         button.dataset.conversationId = conversation.id;
 
         button.addEventListener("click", () => {
             loadConversation(conversation.id);
         });
 
-        conversationList.appendChild(button);
+        const remove = document.createElement("button");
+
+        remove.type = "button";
+        remove.className = "conversation-delete";
+        remove.title = "Delete conversation";
+        remove.setAttribute("aria-label", `Delete ${conversation.title}`);
+
+        twoStep(remove, "\u{1F5D1}", "Delete?", () =>
+            deleteConversation(conversation.id)
+        );
+
+        row.appendChild(button);
+        row.appendChild(remove);
+        conversationList.appendChild(row);
     }
 
     return conversations;
@@ -128,6 +157,8 @@ async function loadConversation(conversationId) {
     }
 
     updateActiveConversation();
+
+    loadFiles(conversationId).catch(console.error);
 
     messageInput.focus();
 }
@@ -155,6 +186,7 @@ async function createConversation() {
 
     clearMessages();
     showEmptyState();
+    renderFiles([]);
 
     await loadConversations();
 
@@ -185,6 +217,8 @@ function setStreaming(active) {
     messageInput.placeholder = active
         ? "ORION is replying..."
         : "Message ORION...";
+
+    attachButton.disabled = active;
 
     sendButton.textContent = active ? "Stop" : "Send";
     sendButton.classList.toggle("stop", active);
@@ -492,6 +526,331 @@ document.addEventListener("keydown", (event) => {
 });
 
 
+// ---- Deleting history ---------------------------------------------------
+
+// A button that asks "are you sure?" by changing its label: the first click
+// arms it, a second click within CONFIRM_MS runs the action.
+function twoStep(button, idleLabel, confirmLabel, action) {
+    let timer = null;
+
+    function reset() {
+        clearTimeout(timer);
+
+        timer = null;
+        button.textContent = idleLabel;
+        button.classList.remove("confirming");
+    }
+
+    reset();
+
+    button.addEventListener("click", async () => {
+        if (timer === null) {
+            button.textContent = confirmLabel;
+            button.classList.add("confirming");
+
+            timer = setTimeout(reset, CONFIRM_MS);
+
+            return;
+        }
+
+        reset();
+
+        await action();
+    });
+}
+
+
+function resetChatView() {
+    activeConversationId = null;
+
+    clearMessages();
+    showEmptyState();
+    renderFiles([]);
+}
+
+
+async function deleteConversation(conversationId) {
+    try {
+        const response = await fetch(`/conversations/${conversationId}`, {
+            method: "DELETE",
+            credentials: "same-origin",
+        });
+
+        if (response.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
+
+        // 404 just means it is already gone; refresh the list either way.
+        if (!response.ok && response.status !== 404) {
+            throw new Error(await errorDetail(response));
+        }
+
+        if (conversationId === activeConversationId) {
+            resetChatView();
+        }
+
+        await loadConversations();
+
+        updateActiveConversation();
+    } catch (error) {
+        console.error(error);
+
+        alert(
+            error instanceof Error
+                ? error.message
+                : "Unable to delete the conversation."
+        );
+    }
+}
+
+
+function describeDeleted(count) {
+    if (count === 0) {
+        return "Nothing to delete.";
+    }
+
+    return `Deleted ${count} conversation${count === 1 ? "" : "s"}.`;
+}
+
+
+async function bulkDelete(query) {
+    clearStatus.textContent = "Deleting...";
+
+    try {
+        const response = await fetch(`/conversations/?${query}`, {
+            method: "DELETE",
+            credentials: "same-origin",
+        });
+
+        if (response.status === 401) {
+            window.location.href = "/login";
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(await errorDetail(response));
+        }
+
+        const result = await response.json();
+        const conversations = await loadConversations();
+
+        if (
+            activeConversationId &&
+            !conversations.some((item) => item.id === activeConversationId)
+        ) {
+            resetChatView();
+        }
+
+        updateActiveConversation();
+
+        clearStatus.textContent = describeDeleted(result.deleted);
+    } catch (error) {
+        console.error(error);
+
+        clearStatus.textContent =
+            error instanceof Error ? error.message : "Unable to delete.";
+    }
+}
+
+
+twoStep(clearOlder, "Delete older chats", "Click again to confirm", () =>
+    bulkDelete(`older_than_days=${encodeURIComponent(clearAge.value)}`)
+);
+
+twoStep(clearAll, "Delete all chats", "Click again to confirm", () =>
+    bulkDelete("scope=all")
+);
+
+clearToggle.addEventListener("click", () => {
+    const opening = clearPanel.hidden;
+
+    clearPanel.hidden = !opening;
+    clearToggle.setAttribute("aria-expanded", String(opening));
+    clearStatus.textContent = "";
+});
+
+
+// ---- Attached files -----------------------------------------------------
+
+function formatTokens(count) {
+    return count < 1000 ? String(count) : `${(count / 1000).toFixed(1)}k`;
+}
+
+
+function renderFiles(files) {
+    fileStrip.innerHTML = "";
+    fileStrip.hidden = files.length === 0;
+    chatElement.classList.toggle("has-files", files.length > 0);
+
+    for (const file of files) {
+        const chip = document.createElement("div");
+
+        chip.className = "file-chip";
+
+        const name = document.createElement("span");
+
+        name.className = "file-name";
+        name.textContent = file.filename; // textContent: names are untrusted
+        name.title = file.filename;
+
+        const meta = document.createElement("span");
+
+        meta.className = "file-meta";
+        meta.textContent = `~${formatTokens(file.token_estimate)} tokens`;
+
+        const remove = document.createElement("button");
+
+        remove.type = "button";
+        remove.className = "file-remove";
+        remove.title = "Remove this file";
+        remove.setAttribute("aria-label", `Remove ${file.filename}`);
+        remove.textContent = "\u00d7";
+
+        remove.addEventListener("click", () => {
+            removeFile(file.id);
+        });
+
+        chip.appendChild(name);
+        chip.appendChild(meta);
+        chip.appendChild(remove);
+        fileStrip.appendChild(chip);
+    }
+}
+
+
+async function loadFiles(conversationId) {
+    const files = await apiRequest(
+        `/conversations/${conversationId}/attachments/`
+    );
+
+    // Ignore a late answer for a conversation the user already left.
+    if (conversationId === activeConversationId) {
+        renderFiles(files);
+    }
+}
+
+
+async function uploadFile(file) {
+    if (!activeConversationId) {
+        await createConversation();
+    }
+
+    const conversationId = activeConversationId;
+
+    const response = await fetch(
+        `/conversations/${conversationId}/attachments/` +
+            `?filename=${encodeURIComponent(file.name)}`,
+        {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: file, // the raw file; no multipart needed
+        }
+    );
+
+    if (response.status === 401) {
+        window.location.href = "/login";
+        return false;
+    }
+
+    if (!response.ok) {
+        throw new Error(`${file.name}: ${await errorDetail(response)}`);
+    }
+
+    await loadFiles(conversationId);
+
+    return true;
+}
+
+
+async function uploadFiles(files) {
+    if (streamController || files.length === 0) {
+        return;
+    }
+
+    attachButton.disabled = true;
+    attachButton.classList.add("busy");
+
+    try {
+        // One at a time, so the per-conversation limits are checked in order.
+        for (const file of files) {
+            if (!(await uploadFile(file))) {
+                return;
+            }
+        }
+    } catch (error) {
+        console.error(error);
+
+        alert(
+            error instanceof Error ? error.message : "Unable to attach the file."
+        );
+    } finally {
+        attachButton.disabled = streamController !== null;
+        attachButton.classList.remove("busy");
+        messageInput.focus();
+    }
+}
+
+
+async function removeFile(attachmentId) {
+    const conversationId = activeConversationId;
+
+    try {
+        const response = await fetch(
+            `/conversations/${conversationId}/attachments/${attachmentId}`,
+            { method: "DELETE", credentials: "same-origin" }
+        );
+
+        if (!response.ok && response.status !== 404) {
+            throw new Error(await errorDetail(response));
+        }
+
+        await loadFiles(conversationId);
+    } catch (error) {
+        console.error(error);
+
+        alert(
+            error instanceof Error ? error.message : "Unable to remove the file."
+        );
+    }
+}
+
+
+attachButton.addEventListener("click", () => {
+    fileInput.click();
+});
+
+
+fileInput.addEventListener("change", async () => {
+    const files = Array.from(fileInput.files);
+
+    fileInput.value = ""; // allow picking the same file again later
+
+    await uploadFiles(files);
+});
+
+
+// Drag and drop onto the chat area.
+chatElement.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    chatElement.classList.add("dragging");
+});
+
+chatElement.addEventListener("dragleave", (event) => {
+    if (event.target === chatElement) {
+        chatElement.classList.remove("dragging");
+    }
+});
+
+chatElement.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    chatElement.classList.remove("dragging");
+
+    await uploadFiles(Array.from(event.dataTransfer.files));
+});
+
+
 // ---- AI status banner ---------------------------------------------------
 
 let statusTimer = null;
@@ -600,6 +959,7 @@ async function initialize() {
         } else {
             activeConversationId = null;
             showEmptyState();
+            renderFiles([]);
             messageInput.focus();
         }
     } catch (error) {

@@ -9,6 +9,7 @@ class El {
     const self = this;
     this.classList = { add: c => { if (!self.className.split(" ").includes(c)) self.className = (self.className + " " + c).trim(); },
       toggle: (c, on) => { const has = self.className.split(" ").includes(c); if (on && !has) self.classList.add(c); if (!on && has) self.className = self.className.split(" ").filter(x => x !== c).join(" "); },
+      remove: c => { self.className = self.className.split(" ").filter(x => x !== c).join(" "); },
       contains: c => self.className.split(" ").includes(c) }; }
   set textContent(v) { this._text = String(v); this.children = []; this._html = ""; }
   get textContent() { return this._text + this.children.map(c => c.textContent).join(""); }
@@ -19,6 +20,7 @@ class El {
   querySelector(sel) { const cls = sel.slice(1); const walk = n => { for (const c of n.children) { if (c.classList.contains(cls)) return c; const r = walk(c); if (r) return r; } return null; }; return walk(this); }
   addEventListener(t, f) { (this.listeners[t] ||= []).push(f); }
   focus() {} select() {}
+  setAttribute(k, v) { this.attrs = this.attrs || {}; this.attrs[k] = v; }
 }
 const ids = {}; const get = id => (ids[id] ||= new El("div"));
 const bodyEl = new El("body");
@@ -119,6 +121,175 @@ const streamRoute = events => async url => url.endsWith("/stream") ? okResponse(
   reset(async url => url.endsWith("/stream") ? okResponse(new ReadableStream({ start(c) { c.enqueue(enc.encode('data: {"type":"user_message"}\n\ndata: {"type":"delta","content":"hi"}\n\n')); realSetTimeout(() => c.error(new TypeError("network")), 20); } })) : history());
   await run("streamReply('x')");
   check("dropped connection: user msg kept, note shown", get("messages").children.length === 2 && content(1).children[1].textContent.includes("Connection lost") && body(1).innerHTML === "<p>hi</p>");
+
+
+  // 11 attached files ---------------------------------------------------
+  const jsonRes = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
+  const calls = [];
+  const strip = () => get("file-strip");
+  const chip = i => strip().children[i];
+  const chipPart = (i, cls) => chip(i).querySelector("." + cls);
+  let serverFiles = [];
+  const fileApi = async (url, opts = {}) => {
+    const method = opts.method || "GET"; calls.push([method, url, opts.body, opts.headers]);
+    if (url === "/conversations/" && method === "POST") return jsonRes({ id: "new1" });
+    if (url === "/conversations/") return jsonRes([]);
+    if (method === "POST") return jsonRes({ id: "f" + (serverFiles.length + 1) }, 201);
+    if (method === "DELETE") { serverFiles = []; return { ok: true, status: 204 }; }
+    return jsonRes(serverFiles);
+  };
+  const fileObj = name => ({ name, size: 10 });
+  const give = (name, o) => { ctx[name] = o; };
+
+  reset(fileApi); calls.length = 0; serverFiles = [{ id: "f1", filename: "story one.txt", token_estimate: 1500 }]; run("renderFiles([])");
+  const f1 = fileObj("story one.txt"); give("__f1", f1);
+  await run("uploadFiles([__f1])");
+  check("upload: raw body POST with filename in the URL",
+    calls[0][0] === "POST" && calls[0][1] === "/conversations/c1/attachments/?filename=story%20one.txt" && calls[0][2] === f1 && calls[0][3]["Content-Type"] === "application/octet-stream", JSON.stringify(calls[0].slice(0, 2)));
+  check("upload: list reloaded afterwards", calls[1][0] === "GET" && calls[1][1] === "/conversations/c1/attachments/");
+  check("chip shows name and token estimate, strip visible",
+    !strip().hidden && chipPart(0, "file-name").textContent === "story one.txt" && chipPart(0, "file-meta").textContent === "~1.5k tokens" && get("chat").classList.contains("has-files"));
+  check("attach button re-enabled after upload", !get("attach-button").disabled && !get("attach-button").classList.contains("busy"));
+
+  // server rejects the file (too big for the model's context)
+  reset(async (url, opts = {}) => opts.method === "POST" ? jsonRes({ detail: "This file is about 9,000 tokens, but only about 2,000 more fit." }, 413) : jsonRes([]));
+  run("renderFiles([])"); give("__f2", fileObj("big.txt"));
+  await run("uploadFiles([__f2])");
+  check("413: server's explanation shown with the file name, strip unchanged", alerts[0] === "big.txt: This file is about 9,000 tokens, but only about 2,000 more fit." && strip().hidden);
+
+  // no conversation yet: one is created first
+  reset(fileApi); calls.length = 0; run("activeConversationId = null"); serverFiles = [];
+  give("__f3", fileObj("a.txt")); await run("uploadFiles([__f3])");
+  check("no active conversation: creates one, then uploads to it",
+    calls[0][0] === "POST" && calls[0][1] === "/conversations/" && calls.some(c => c[0] === "POST" && c[1] === "/conversations/new1/attachments/?filename=a.txt"), JSON.stringify(calls.map(c => c[0] + " " + c[1])));
+
+  // remove a file
+  reset(fileApi); calls.length = 0; serverFiles = [{ id: "f1", filename: "s.txt", token_estimate: 40 }];
+  run("renderFiles([{id:'f1',filename:'s.txt',token_estimate:40}])");
+  chipPart(0, "file-remove").listeners.click[0]();            // fire-and-forget, like a real click
+  await new Promise(r => realSetTimeout(r, 30));
+  check("remove: DELETE sent, strip hidden when empty",
+    calls[0][0] === "DELETE" && calls[0][1] === "/conversations/c1/attachments/f1" && strip().hidden && !get("chat").classList.contains("has-files"), JSON.stringify(calls.map(c => c[0] + " " + c[1])));
+
+  // 401 redirects
+  reset(async () => jsonRes({}, 401)); loc.href = ""; give("__f4", fileObj("x.txt"));
+  await run("uploadFiles([__f4])"); check("upload 401 -> /login", loc.href === "/login");
+
+  // drag and drop: several files, uploaded in order
+  reset(fileApi); calls.length = 0; serverFiles = [];
+  let prevented = 0; await get("chat").listeners.dragover[0]({ preventDefault() { prevented++; } });
+  check("dragover allows the drop and shows the overlay", prevented === 1 && get("chat").classList.contains("dragging"));
+  await get("chat").listeners.drop[0]({ preventDefault() { prevented++; }, dataTransfer: { files: [fileObj("one.md"), fileObj("two.pdf")] } });
+  const posts = calls.filter(c => c[0] === "POST").map(c => c[1]);
+  check("drop: files uploaded in order, overlay hidden",
+    JSON.stringify(posts) === JSON.stringify(["/conversations/c1/attachments/?filename=one.md", "/conversations/c1/attachments/?filename=two.pdf"]) && !get("chat").classList.contains("dragging"), JSON.stringify(posts));
+
+  // not while a reply is streaming
+  reset(fileApi); calls.length = 0; run("setStreaming(true)");
+  check("attach button disabled while streaming", get("attach-button").disabled === true);
+  run("streamController = {}"); give("__f5", fileObj("late.txt")); await run("uploadFiles([__f5])");
+  check("uploads ignored while streaming", calls.length === 0);
+  run("streamController = null; setStreaming(false)");
+  check("attach button back after streaming", get("attach-button").disabled === false);
+
+  // untrusted file names never become HTML
+  run("renderFiles([{id:'x',filename:'<img src=x onerror=alert(1)>.txt',token_estimate:5}])");
+  check("file name rendered as text, not HTML", chipPart(0, "file-name").textContent === "<img src=x onerror=alert(1)>.txt" && chipPart(0, "file-name").innerHTML === "");
+
+  // a late answer for a conversation the user already left is ignored
+  reset(async () => jsonRes([{ id: "z", filename: "stale.txt", token_estimate: 1 }])); run("renderFiles([])");
+  await run("loadFiles('some-other-conversation')");
+  check("stale file list ignored", strip().hidden === true);
+
+
+  // 12 deleting history -------------------------------------------------
+  const list = () => get("conversation-list");
+  const row = i => list().children[i];
+  const selectBtn = i => row(i).children[0];
+  const trashBtn = i => row(i).children[1];
+  const settle = (ms = 25) => new Promise(r => realSetTimeout(r, ms));
+  let convs, dcalls, deleteStatus, bulkResult, bulkStatus;
+  const delApi = async (url, opts = {}) => {
+    const method = opts.method || "GET"; dcalls.push(method + " " + url);
+    if (method === "DELETE" && url.startsWith("/conversations/?")) {
+      if (bulkStatus && bulkStatus !== 200) return jsonRes({ detail: "Give exactly one of older_than_days or scope=all." }, bulkStatus);
+      if (url.includes("scope=all")) convs = []; else convs = convs.slice(0, 1);
+      return jsonRes(bulkResult);
+    }
+    if (method === "DELETE") { if (deleteStatus === 200 || deleteStatus === undefined) convs = convs.filter(c => url !== "/conversations/" + c.id); return deleteStatus && deleteStatus !== 200 ? jsonRes({ detail: "boom" }, deleteStatus) : jsonRes({ status: "deleted" }); }
+    if (url === "/conversations/") return jsonRes(convs);
+    if (url.endsWith("/messages/")) return jsonRes([]);
+    return jsonRes([]);
+  };
+  const setup = async (list0, active) => { reset(delApi); dcalls = []; deleteStatus = undefined; bulkStatus = undefined; bulkResult = { deleted: 2 }; convs = list0; run("CONFIRM_MS = 3000"); run(`activeConversationId = ${JSON.stringify(active)}`); await run("loadConversations()"); dcalls.length = 0; get("clear-status").textContent = ""; };
+
+  await setup([{ id: "a", title: "First chat" }, { id: "b", title: "<img src=x onerror=alert(1)>" }], "a");
+  check("sidebar: a row per conversation (select button + trash button)", list().children.length === 2 && selectBtn(0).textContent === "First chat" && trashBtn(0).textContent === "\u{1F5D1}" && trashBtn(0).title === "Delete conversation");
+  check("sidebar: titles are text, never HTML", selectBtn(1).textContent === "<img src=x onerror=alert(1)>" && selectBtn(1).innerHTML === "");
+
+  // two-step confirm
+  await trashBtn(1).listeners.click[0]();
+  check("trash: first click only arms it (label 'Delete?', no request)", trashBtn(1).textContent === "Delete?" && trashBtn(1).classList.contains("confirming") && dcalls.length === 0);
+  await trashBtn(1).listeners.click[0](); await settle();
+  check("trash: second click deletes, then the list is refreshed", dcalls[0] === "DELETE /conversations/b" && dcalls.includes("GET /conversations/") && list().children.length === 1);
+  check("deleting a different chat keeps the open one", run("activeConversationId") === "a");
+
+  // confirmation times out
+  await setup([{ id: "a", title: "A" }, { id: "b", title: "B" }], "a"); run("CONFIRM_MS = 20");
+  await trashBtn(1).listeners.click[0](); await settle(70);
+  check("arming expires: label restored", trashBtn(1).textContent === "\u{1F5D1}" && !trashBtn(1).classList.contains("confirming"));
+  await trashBtn(1).listeners.click[0]();
+  check("after expiry the next click arms again instead of deleting", dcalls.length === 0 && trashBtn(1).textContent === "Delete?");
+
+  // deleting the open chat resets the view
+  await setup([{ id: "a", title: "A" }, { id: "b", title: "B" }], "a");
+  run("renderMessage({role:'user', content:'hello'}); renderFiles([{id:'f',filename:'x.txt',token_estimate:3}])");
+  await trashBtn(0).listeners.click[0](); await trashBtn(0).listeners.click[0](); await settle();
+  check("deleting the open chat: view reset, no active chat, files strip hidden",
+    run("activeConversationId") === null && get("messages").innerHTML.includes("Welcome to ORION") && get("file-strip").hidden === true && list().children.length === 1);
+
+  // already gone (404) is fine; real errors are reported
+  await setup([{ id: "a", title: "A" }], "x"); deleteStatus = 404;
+  await trashBtn(0).listeners.click[0](); await trashBtn(0).listeners.click[0](); await settle();
+  check("404 on delete: no alert, list refreshed", alerts.length === 0 && dcalls.includes("GET /conversations/"));
+  await setup([{ id: "a", title: "A" }], "x"); deleteStatus = 500;
+  await trashBtn(0).listeners.click[0](); await trashBtn(0).listeners.click[0](); await settle();
+  check("server error on delete: message shown, chat still listed", alerts[0] === "boom" && list().children.length === 1);
+  await setup([{ id: "a", title: "A" }], "x"); deleteStatus = 401; loc.href = "";
+  await trashBtn(0).listeners.click[0](); await trashBtn(0).listeners.click[0](); await settle();
+  check("401 on delete -> /login", loc.href === "/login");
+
+  // clear-history panel
+  await setup([{ id: "a", title: "A" }, { id: "b", title: "B" }, { id: "c", title: "C" }], "a");
+  get("clear-panel").hidden = true;                 // the page ships it with the HTML `hidden` attribute
+  check("panel starts closed", get("clear-panel").hidden === true);
+  get("clear-toggle").listeners.click[0]();
+  check("toggle opens the panel", get("clear-panel").hidden === false && get("clear-toggle").attrs["aria-expanded"] === "true");
+  get("clear-toggle").listeners.click[0]();
+  check("toggle closes it again", get("clear-panel").hidden === true && get("clear-toggle").attrs["aria-expanded"] === "false");
+
+  get("clear-age").value = "7"; bulkResult = { deleted: 2 };
+  await get("clear-older").listeners.click[0]();
+  check("older-than: first click only arms it", get("clear-older").textContent === "Click again to confirm" && dcalls.length === 0);
+  await get("clear-older").listeners.click[0](); await settle();
+  check("older-than: confirmed -> DELETE with the chosen days", dcalls[0] === "DELETE /conversations/?older_than_days=7", dcalls[0]);
+  check("older-than: reports the count and refreshes the list", get("clear-status").textContent === "Deleted 2 conversations." && list().children.length === 1 && get("clear-older").textContent === "Delete older chats");
+  check("older-than: the open chat survived so it stays open", run("activeConversationId") === "a");
+
+  bulkResult = { deleted: 1 }; await get("clear-older").listeners.click[0](); await get("clear-older").listeners.click[0](); await settle();
+  check("singular wording", get("clear-status").textContent === "Deleted 1 conversation.");
+  bulkResult = { deleted: 0 }; await get("clear-older").listeners.click[0](); await get("clear-older").listeners.click[0](); await settle();
+  check("zero -> 'Nothing to delete.'", get("clear-status").textContent === "Nothing to delete.");
+
+  await setup([{ id: "a", title: "A" }, { id: "b", title: "B" }], "a"); bulkResult = { deleted: 2 };
+  run("renderMessage({role:'user', content:'hello'})");
+  await get("clear-all").listeners.click[0](); await get("clear-all").listeners.click[0](); await settle();
+  check("delete all: DELETE ?scope=all", dcalls[0] === "DELETE /conversations/?scope=all", dcalls[0]);
+  check("delete all: sidebar empty and the open chat's view reset", list().children.length === 0 && run("activeConversationId") === null && get("messages").innerHTML.includes("Welcome to ORION"));
+
+  await setup([{ id: "a", title: "A" }], "a"); bulkStatus = 400;
+  await get("clear-all").listeners.click[0](); await get("clear-all").listeners.click[0](); await settle();
+  check("bulk error: shown in the panel, nothing removed from the list", get("clear-status").textContent === "Give exactly one of older_than_days or scope=all." && list().children.length === 1 && alerts.length === 0);
 
   // 10 banner
   const banner = s => { run(`renderBanner(${JSON.stringify(s)})`); return [get("ai-banner").hidden, get("ai-banner").className, get("ai-banner").textContent]; };

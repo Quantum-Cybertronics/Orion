@@ -45,10 +45,44 @@
                 <!-- Conversations will appear here -->
             </div>
 
+            <div class="sidebar-footer">
+
+                <button
+                    id="clear-toggle"
+                    class="clear-toggle"
+                    type="button"
+                    aria-expanded="false"
+                >Clear history&hellip;</button>
+
+                <div id="clear-panel" class="clear-panel" hidden>
+
+                    <label class="clear-row">
+                        <span>Older than</span>
+                        <select id="clear-age">
+                            <option value="7">7 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="90">90 days</option>
+                        </select>
+                    </label>
+
+                    <button id="clear-older" class="danger" type="button">
+                        Delete older chats
+                    </button>
+
+                    <button id="clear-all" class="danger" type="button">
+                        Delete all chats
+                    </button>
+
+                    <p id="clear-status" class="clear-status" role="status"></p>
+
+                </div>
+
+            </div>
+
         </aside>
 
 
-        <section class="chat">
+        <section id="chat" class="chat">
 
             <div id="ai-banner" class="ai-banner" role="status" hidden></div>
 
@@ -64,7 +98,25 @@
             </div>
 
 
+            <div id="file-strip" class="file-strip" hidden></div>
+
             <form id="message-form" class="message-form">
+
+                <button
+                    id="attach-button"
+                    class="attach"
+                    type="button"
+                    title="Attach a file"
+                    aria-label="Attach a file"
+                >&#128206;</button>
+
+                <input
+                    id="file-input"
+                    type="file"
+                    multiple
+                    hidden
+                    accept=".txt,.md,.markdown,.rst,.csv,.tsv,.json,.log,.yaml,.yml,.toml,.ini,.cfg,.sql,.py,.js,.ts,.java,.c,.h,.cpp,.hpp,.cs,.go,.rs,.rb,.php,.sh,.bat,.ps1,.pdf,.docx"
+                >
 
                 <input
                     id="message-input"

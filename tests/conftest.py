@@ -4,6 +4,7 @@ import tempfile
 # Must run before any app import so tests never touch the real data/ folder.
 os.environ.setdefault("ORION_DATA_DIR", tempfile.mkdtemp(prefix="orion-test-"))
 os.environ["ORION_AI_PROVIDER"] = "echo"  # tests never launch a real model
+os.environ["ORION_AUTO_VACUUM"] = "0"  # no background VACUUM threads during tests
 
 import pytest
 from fastapi.testclient import TestClient

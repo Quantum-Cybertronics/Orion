@@ -129,12 +129,15 @@ def create_streaming(
         if not content.strip():
             return None
 
-        with Session(engine) as session:
-            return save_assistant_message(
-                session,
-                conversation_id=conversation_id,
-                content=content,
-            )
+        try:
+            with Session(engine) as session:
+                return save_assistant_message(
+                    session,
+                    conversation_id=conversation_id,
+                    content=content,
+                )
+        except ConversationNotFoundError:
+            return None  # conversation was deleted while replying
 
     def event_stream() -> Iterator[str]:
         parts: list[str] = []

@@ -45,7 +45,8 @@ to an echo stand-in and says so at `GET /ai/status`.
 | `ORION_AI_PROVIDER` | `auto` | `auto`, `llama` (fail loudly if unusable) or `echo` |
 | `ORION_MODEL_PATH` | first `models/*.gguf` | use a specific model file |
 | `ORION_LLAMA_SERVER` | `runtime/llama/<os-cpu>/` | use a specific llama-server |
-| `ORION_LLAMA_CTX` | `4096` | context window in tokens |
+| `ORION_LLAMA_CTX` | `8192` | context window in tokens (also limits how much attached-file text fits) |
+| `ORION_MAX_UPLOAD_MB` | `5` | largest file that can be uploaded |
 | `ORION_MAX_REPLY_TOKENS` | `1024` | longest single reply |
 | `ORION_LLAMA_THREADS` | auto | CPU threads |
 | `ORION_LLAMA_STARTUP_TIMEOUT` | `180` | seconds to wait for the model to load |
@@ -53,6 +54,19 @@ to an echo stand-in and says so at `GET /ai/status`.
 Streaming endpoint: `POST /conversations/{id}/messages/stream` returns
 server-sent events (`user_message`, `delta`, `done`, `error`). The server log
 is written to `data/llama-server.log`.
+
+## Attaching files
+
+Click the paperclip (or drop a file on the chat) to attach a file to the
+current conversation, then ask questions about it. Supported: text and code
+files (`.txt .md .csv .json .py` ...), `.docx`, and `.pdf` with selectable text
+(`pip install pypdf`). ORION stores only the extracted text, so deleting a
+conversation removes everything that came from the upload.
+
+The file's text is sent to the model with every question, so it must fit in the
+context window (`ORION_LLAMA_CTX`) alongside your chat. ORION tells you if it
+doesn't. The first question after attaching a big file is slower because the
+model has to read the file; later questions reuse that work.
 
 ## Status
 

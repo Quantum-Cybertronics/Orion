@@ -49,3 +49,9 @@ class Conversation(Base):
         back_populates="conversation",
         cascade="all, delete-orphan",
     )
+
+    attachments = relationship(
+        "Attachment",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )

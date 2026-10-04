@@ -4,6 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.backend.ai.service import AIService
+from app.backend.attachments.context import build_file_context, load_attachments
 from app.backend.models import Conversation, Message
 
 
@@ -98,6 +99,8 @@ def begin_user_turn(
 
     db.add(user_message)
 
+    conversation.updated_at = datetime.now(timezone.utc)  # last activity
+
     if is_first_message and conversation.title == "New conversation":
         try:
             conversation.title = ai_service.generate_title(content)
@@ -121,6 +124,13 @@ def begin_user_turn(
         for message in db.scalars(statement).all()
     ]
 
+    # Attached files ride along as a system message on every turn. They are
+    # not stored as chat messages, so they never appear in the transcript.
+    file_context = build_file_context(load_attachments(db, conversation.id))
+
+    if file_context:
+        history.insert(0, {"role": "system", "content": file_context})
+
     return user_message, history
 
 
@@ -129,11 +139,19 @@ def save_assistant_message(
     conversation_id: str,
     content: str,
 ) -> Message:
+    conversation = db.get(Conversation, conversation_id)
+
+    if conversation is None:
+        # Deleted while the reply was being written (e.g. from another tab).
+        raise ConversationNotFoundError
+
     assistant_message = Message(
         conversation_id=conversation_id,
         role="assistant",
         content=content,
     )
+
+    conversation.updated_at = datetime.now(timezone.utc)  # last activity
 
     db.add(assistant_message)
     db.commit()
