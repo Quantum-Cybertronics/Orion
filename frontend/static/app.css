@@ -110,6 +110,35 @@ body {
     font-size: 12px;
 }
 
+.model-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    min-width: 0;
+
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.model-picker select {
+    max-width: 320px;
+    padding: 7px 10px;
+
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-light);
+    color: var(--text);
+
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.model-picker select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .user-area {
     display: flex;
     align-items: center;
@@ -468,6 +497,14 @@ body {
 
     .user-area span {
         display: none;
+    }
+
+    .model-picker label {
+        display: none;
+    }
+
+    .model-picker select {
+        max-width: 150px;
     }
 
     .sidebar {

@@ -1,0 +1,873 @@
+pip install replicate
+python.exe -m pip install --upgrade pip
+pip install torch
+pip install transformers
+pip install PyTorch
+pip install -U diffusers
+pip uninstall torch
+pip install torch --no-cache-dir
+pip install matplotlib
+pip install customtkinter
+pip install accelerate
+pip install diffusers
+pip install transformers ntlk chatterbot
+python.exe -m pip install --upgrade pip
+pip install nltk
+pip install chatterbot
+pip install transformers
+pip install chatterbot
+pip install spacy
+pip install chatterbot
+pip install spacy==2.0.18
+[pip install openai
+pip install openai
+pip install torch
+pip install chatterbot
+pip install Flask
+pip install --upgrade google-api-python-client google-auth google-auth-oauthlib
+pip install google-api-python-client
+python.exe -m pip install --upgrade pip
+pip install YouTube
+pip install youtube
+pip3 install 'google-api-python-client==1.7.2'
+pip3 install 'google-auth==1.8.0'
+pip3 install 'google-auth-httplib2==0.0.3'
+pip3 install 'google-auth-oauthlib==0.4.1'
+pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+python.exe -m pip install --upgrade pip
+pip install flask
+pip install sqlalchemy
+pip install psycopg2
+pip install cryptography
+pip install pygame
+pip install pyttsx3
+pip install gtts
+python.exe -m pip install --upgrade pip
+pip install flask
+python.exe -m pip install --upgrade pip
+pip install requests beautifulsoup4
+python.exe -m pip install --upgrade pip
+pip install tabulate
+pip install psycopg2
+pip install flask psycopg2 bcrypt configparser
+Pip install numpy
+pip install pymc
+pip install pytensor
+pip install pygame
+ollama --version
+Get-ChildItem C:\ -Force -Directory -ErrorAction SilentlyContinue |`
+ForEach-Object {`
+    $size = (Get-ChildItem $_.FullName -Force -File -Recurse -ErrorAction SilentlyContinue |`
+        Measure-Object Length -Sum).Sum`
+    [PSCustomObject]@{`
+        Folder = $_.FullName`
+        SizeGB = [math]::Round($size / 1GB, 2)`
+    }`
+} | Sort-Object SizeGB -Descending
+Get-ChildItem C:\ProgramData -Force -Directory -ErrorAction SilentlyContinue |`
+ForEach-Object {`
+    $size = (Get-ChildItem $_.FullName -Force -File -Recurse -ErrorAction SilentlyContinue |`
+        Measure-Object Length -Sum).Sum`
+    [PSCustomObject]@{`
+        Folder = $_.FullName`
+        SizeGB = [math]::Round($size / 1GB, 2)`
+    }`
+} | Sort-Object SizeGB -Descending
+Get-ChildItem "C:\ProgramData\McAfee" -Force -Directory |`
+ForEach-Object {`
+    $size = (Get-ChildItem $_.FullName -Force -File -Recurse -ErrorAction SilentlyContinue |`
+        Measure-Object Length -Sum).Sum`
+    [PSCustomObject]@{`
+        Folder = $_.FullName`
+        SizeGB = [math]::Round($size / 1GB, 2)`
+    }`
+} | Sort-Object SizeGB -Descending
+Get-ChildItem "C:\ProgramData\McAfee\WPS" -Force -Directory |`
+ForEach-Object {`
+    $size = (Get-ChildItem $_.FullName -Force -File -Recurse -ErrorAction SilentlyContinue |`
+        Measure-Object Length -Sum).Sum`
+    [PSCustomObject]@{`
+        Folder = $_.FullName`
+        SizeGB = [math]::Round($size / 1GB, 2)`
+    }`
+} | Sort-Object SizeGB -Descending
+Get-ChildItem "C:\ProgramData\McAfee\WPS" -Force -File |`
+Select-Object Name, Length, LastWriteTime
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -Force -File |`
+Sort-Object Length -Descending |`
+Select-Object -First 20 Name,`
+    @{Name="SizeGB";Expression={[math]::Round($_.Length/1GB,2)}},`
+    LastWriteTime
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -Force -File |`
+Group-Object Extension |`
+Select-Object Name, Count,`
+    @{Name="TotalGB";Expression={[math]::Round((($_.Group | Measure-Object Length -Sum).Sum)/1GB,2)}} |`
+Sort-Object TotalGB -Descending
+Get-Process | Where-Object {`
+    $_.ProcessName -match 'McAfee|WPS|WebAdvisor'`
+} | Select-Object ProcessName, Id
+Get-Service | Where-Object {`
+    $_.DisplayName -match 'McAfee|WebAdvisor|WPS' -or`
+    $_.Name -match 'McAfee|WebAdvisor|WPS'`
+} | Select-Object Status, Name, DisplayName
+Get-Item "C:\ProgramData\McAfee\WPS\log\*.etl" |`
+Sort-Object LastWriteTime |`
+Select-Object -First 5 Name, Length, LastWriteTime
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -Filter "wps-*.etl" -File |`
+Group-Object { $_.LastWriteTime.ToString("yyyy-MM") } |`
+Select-Object Name, Count,`
+    @{Name="SizeGB";Expression={[math]::Round((($_.Group | Measure-Object Length -Sum).Sum)/1GB,2)}} |`
+Sort-Object Name
+Get-CimInstance Win32_Service |`
+Where-Object {$_.Name -eq "McAfee WebAdvisor"} |`
+Select-Object Name, State, StartMode, PathName
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -Filter "wps-*.etl" -File |`
+Sort-Object LastWriteTime -Descending |`
+Select-Object -First 10 Name,`
+    @{Name="SizeMB";Expression={[math]::Round($_.Length/1MB,1)}},`
+    LastWriteTime
+(Get-Item "C:\Program Files\McAfee\WebAdvisor\ServiceHost.exe").VersionInfo |`
+Select-Object ProductVersion, FileVersion, ProductName
+Stop-Service "McAfee WebAdvisor"
+Get-Service "McAfee WebAdvisor"
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -Filter "wps-*.etl" -File |`
+Remove-Item -Force
+Start-Service "McAfee WebAdvisor"
+Get-Service "McAfee WebAdvisor"
+Get-ChildItem "C:\ProgramData\McAfee" -Recurse -File -ErrorAction SilentlyContinue |`
+    Sort-Object Length -Descending |`
+    Select-Object -First 30 FullName,@{Name="SizeGB";Expression={[math]::Round($_.Length/1GB,2)}}
+$path = "C:\ProgramData\McAfee\WPS\log"
+Get-ChildItem $path -File -ErrorAction SilentlyContinue |`
+    Measure-Object Length -Sum |`
+    Select-Object @{Name="TotalGB";Expression={[math]::Round($_.Sum/1GB,2)}},`
+                  @{Name="FileCount";Expression={$_.Count}}
+$path = "C:\ProgramData\McAfee\WPS\log"
+Get-ChildItem $path -Filter "*.etl" -File |`
+    Sort-Object LastWriteTime |`
+    Select-Object Name, LastWriteTime,`
+        @{Name="SizeMB";Expression={[math]::Round($_.Length/1MB,1)}} |`
+    Format-Table -AutoSize
+Get-CimInstance Win32_Process |`
+    Where-Object {`
+        $_.Name -match "mcafee|wps" -or`
+        $_.ExecutablePath -match "McAfee|WPS"`
+    } |`
+    Select-Object ProcessId,Name,ExecutablePath |`
+    Format-Table -AutoSize
+Get-Service |`
+    Where-Object {`
+        $_.Name -match "mcafee|wps" -or`
+        $_.DisplayName -match "mcafee|wps"`
+    } |`
+    Select-Object Status,Name,DisplayName |`
+    Format-Table -AutoSize
+Stop-Service -Name "McAfee WebAdvisor" -Force
+Get-Service -Name "McAfee WebAdvisor"
+Get-CimInstance Win32_Process |`
+    Where-Object {`
+        $_.ExecutablePath -like "C:\ProgramData\McAfee\WPS\*"`
+    } |`
+    Select-Object ProcessId,Name,ExecutablePath
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -Filter "*.etl" -File |`
+    Measure-Object Length -Sum |`
+    Select-Object @{Name="TotalGB";Expression={[math]::Round($_.Sum/1GB,2)}},`
+                  @{Name="FileCount";Expression={$_.Count}}
+Stop-Process -Id 23748 -Force
+Get-Process -Id 23748 -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process |`
+    Where-Object {`
+        $_.ExecutablePath -like "C:\ProgramData\McAfee\WPS\*"`
+    } |`
+    Select-Object ProcessId,Name,ExecutablePath
+$path = "C:\ProgramData\McAfee\WPS\log"
+Get-ChildItem $path -Filter "*.etl" -File |`
+    Remove-Item -Force
+Get-CimInstance Win32_Process |`
+    Where-Object {`
+        $_.Name -match "mc-neo|servicehost|uihost" -or`
+        $_.ExecutablePath -like "C:\ProgramData\McAfee\WPS\*"`
+    } |`
+    Select-Object ProcessId,Name,ExecutablePath
+Get-Process -Id 23748 -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process |`
+    Where-Object {`
+        $_.Name -match "mc-neo|mcafee|wps"`
+    } |`
+    Select-Object ProcessId,Name,ExecutablePath
+Get-Process -Id 13724 | Select-Object Id,ProcessName,StartTime
+$path = "C:\ProgramData\McAfee\WPS\log"
+Get-ChildItem $path -Filter "*.etl" -File |`
+    Measure-Object Length -Sum |`
+    Select-Object @{Name="TotalGB";Expression={[math]::Round($_.Sum/1GB,2)}},`
+                  @{Name="FileCount";Expression={$_.Count}}
+Get-ChildItem $path -Filter "*.etl" -File |`
+    Sort-Object LastWriteTime -Descending |`
+    Select-Object -First 10 Name,LastWriteTime,`
+        @{Name="SizeMB";Expression={[math]::Round($_.Length/1MB,1)}}
+$p = Get-CimInstance Win32_Process -Filter "ProcessId = 13724"
+Get-CimInstance Win32_Process -Filter "ProcessId = $($p.ParentProcessId)" |`
+    Select-Object ProcessId,Name,ExecutablePath,CommandLine
+Get-CimInstance Win32_Process -Filter "ProcessId = 13724" |`
+    Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine
+Get-CimInstance Win32_Service |`
+    Where-Object {`
+        $_.PathName -match "McAfee|WPS" -or`
+        $_.Name -match "McAfee|WPS"`
+    } |`
+    Select-Object Name,DisplayName,State,StartMode,PathName |`
+    Format-List
+Get-ItemProperty ``
+    "HKLM:\SOFTWARE\Classes\CLSID\*" ``
+    -ErrorAction SilentlyContinue |`
+    Where-Object {`
+        $_.LocalServer32 -match "mc-neo|WPS|McAfee"`
+    } |`
+    Select-Object PSPath,LocalServer32
+Stop-Service -Name "mc-fw-host" -Force
+Start-Service -Name "McAfee WebAdvisor"
+Get-Service "McAfee WebAdvisor","mc-fw-host" |`
+    Select-Object Status,Name,DisplayName
+$path = "C:\ProgramData\McAfee\WPS\log"
+Get-ChildItem $path -Filter "*.etl" -File |`
+    Measure-Object Length -Sum |`
+    Select-Object @{Name="TotalGB";Expression={[math]::Round($_.Sum/1GB,2)}},`
+                  @{Name="FileCount";Expression={$_.Count}}
+pip install requests
+Get-ChildItem "C:\ProgramData\McAfee" -Recurse -File -ErrorAction SilentlyContinue |`
+Sort-Object Length -Descending |`
+Select-Object -First 20 FullName,@{Name="SizeGB";Expression={[math]::Round($_.Length/1GB,2)}}
+Get-Service | Where-Object {$_.DisplayName -like "*McAfee*"} |`
+Format-Table Name,DisplayName,Status
+$path="C:\ProgramData\McAfee\WPS\log"
+"{0:N2} GB" -f ((Get-ChildItem $path -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB)
+Stop-Service -Name "McAfee WebAdvisor" -Force
+Remove-Item "C:\ProgramData\McAfee\WPS\log\*.etl" -Force
+Start-Service -Name "McAfee WebAdvisor" -Force
+Get-Service | Where-Object {$_.DisplayName -like "*McAfee*"} |`
+Format-Table Name,DisplayName,Status
+Start-Service -Name "McAfee WebAdvisor"
+Get-Service | Where-Object {$_.Name -like "*McAfee*" -or $_.DisplayName -like "*McAfee*"} |`
+Format-Table Name,DisplayName,Status
+Get-Process | Where-Object {$_.ProcessName -match "mcafee|mfe|wps"} |`
+Select-Object Id,ProcessName,Path
+Get-Process | Where-Object {$_.ProcessName -match "mcafee|mfe|wps"} Select-Object Id,ProcessName,Path
+Stop-Service -Name "McAfee WebAdvisor" -Force
+Get-Service -Name "McAfee WebAdvisor"
+Get-Process | Where-Object {$_.ProcessName -match "mcafee|mfe|wps"} | Select-Object Id,ProcessName,Path
+Remove-Item "C:\ProgramData\McAfee\WPS\log\*.etl" -Force
+Get-Acl "C:\ProgramData\McAfee\WPS\log\wps-2026-09-17T12-25-08.746Z-00c700000b320b91-5.etl" | Format-List
+Get-Item "C:\ProgramData\McAfee\WPS\log\wps-2026-09-17T12-25-08.746Z-00c700000b320b91-5.etl" -Force |`
+Select-Object FullName,Attributes,Length,CreationTime,LastWriteTime
+Stop-Service -Name "mc-fw-host" -Force
+Get-Service -Name "mc-fw-host"
+$path="C:\ProgramData\McAfee\WPS\log"
+"{0:N2} GB" -f ((Get-ChildItem $path -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB)
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -File |`
+Sort-Object LastWriteTime -Descending |`
+Select-Object -First 10 Name,`
+@{N="MB";E={[math]::Round($_.Length/1MB,1)}},`
+LastWriteTime
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" ,`
+"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" ``
+-ErrorAction SilentlyContinue |`
+Where-Object {$_.DisplayName -like "*McAfee*"} |`
+Select-Object DisplayName,DisplayVersion,Publisher |`
+Format-Table -AutoSize
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -File |`
+Group-Object Extension |`
+Select-Object Name,Count,@{N="GB";E={[math]::Round((($_.Group | Measure-Object Length -Sum).Sum)/1GB,2)}}
+Get-ScheduledTask | Where-Object {`
+    $_.TaskName -like "*McAfee*" -or`
+    $_.TaskPath -like "*McAfee*"`
+} | Select-Object TaskPath,TaskName,State
+Get-ChildItem "C:\Program Files\McAfee\WPS\1.40.161.1" -File -Recurse |`
+Select-Object FullName |`
+Where-Object {$_.FullName -match "repair|remove|uninstall|cleanup|update"} 
+Start-ScheduledTask -TaskPath "\McAfee\WPS\" -TaskName "McAfee Updater"
+Start-Service -Name "McAfee WebAdvisor"
+(Get-Item "C:\Program Files\McAfee\WPS\1.40.161.1\mc-update.exe").VersionInfo |`
+Select-Object FileVersion,ProductVersion
+"{0:N2} GB" -f ((Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB)
+Get-Package | Where-Object {$_.Name -like "*McAfee*"} |`
+Select-Object Name,Version,ProviderName
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" ,`
+"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" ``
+-ErrorAction SilentlyContinue |`
+Where-Object {$_.DisplayName -like "*McAfee*"} |`
+Select-Object DisplayName,DisplayVersion,UninstallString,QuietUninstallString
+Get-ScheduledTask -TaskPath "\McAfee\WPS\" |`
+ForEach-Object {`
+    $task = $_`
+    $action = Get-ScheduledTaskInfo -TaskPath $task.TaskPath -TaskName $task.TaskName`
+    [PSCustomObject]@{`
+        Task = $task.TaskName`
+        State = $task.State`
+        LastRun = $action.LastRunTime`
+        NextRun = $action.NextRunTime`
+        LastResult = $action.LastTaskResult`
+    }`
+} | Sort-Object LastRun -Descending | Format-Table -AutoSize
+Get-CimInstance Win32_Service |`
+Where-Object {`
+    $_.PathName -like "*McAfee*" -or`
+    $_.Name -like "*McAfee*" -or`
+    $_.DisplayName -like "*McAfee*"`
+} |`
+Select-Object Name,DisplayName,State,StartMode,PathName |`
+Format-List
+Get-Process -IncludeUserName |`
+Where-Object {$_.Path -like "*\McAfee\*"} |`
+Select-Object Id,ProcessName,Path,UserName |`
+Format-Table -AutoSize
+cd D:
+cd .\Handle\
+handle64.exe "C:\ProgramData\McAfee\WPS\log"
+dir
+.\handle64.exe "C:\ProgramData\McAfee\WPS\log"
+Get-WinEvent -ListLog * |`
+Where-Object {$_.LogName -match "McAfee|WPS"} |`
+Select-Object LogName, IsEnabled, RecordCount, FileSize |`
+Format-Table -AutoSize
+cd C:\Windows\System32\
+Get-WinEvent -ListLog * |`
+Where-Object {$_.LogName -match "McAfee|WPS"} |`
+Select-Object LogName, IsEnabled, RecordCount, FileSize |`
+Format-Table -AutoSize
+clear
+Get-WinEvent -ListLog * |`
+Where-Object {$_.LogName -match "McAfee|WPS"} |`
+Select-Object LogName, IsEnabled, RecordCount, FileSize |`
+Format-Table -AutoSize
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -File |`
+Group-Object Extension |`
+Select-Object Name,Count,@{N="TotalGB";E={[math]::Round(($_.Group | Measure-Object Length -Sum).Sum/1GB,2)}}
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -File |`
+Sort-Object LastWriteTime -Descending |`
+Select-Object -First 20 Name,`
+    @{N="SizeMB";E={[math]::Round($_.Length/1MB,1)}},`
+    CreationTime,`
+    LastWriteTime
+Get-ChildItem "C:\ProgramData\McAfee\WPS\log" -File |`
+Measure-Object Length -Sum |`
+Select-Object Count,@{N="GB";E={[math]::Round($_.Sum/1GB,2)}}
+Get-Item "C:\Program Files\McAfee\WPS\1.40.161.1\mc-fw-host.exe" |`
+Select-Object FullName,@{N="FileVersion";E={$_.VersionInfo.FileVersion}},@{N="ProductVersion";E={$_.VersionInfo.ProductVersion}}
+Get-Item "C:\ProgramData\McAfee\WPS\content\neo-core\26.7.0.146\mc-neo-host.exe" |`
+Select-Object FullName,@{N="FileVersion";E={$_.VersionInfo.FileVersion}},@{N="ProductVersion";E={$_.VersionInfo.ProductVersion}}
+d:
+Git clone https://github.com/Quantum-Cybertronics/Orion
+CD .\Orion\
+New-Item -ItemType Directory -Force -Path ``
+    "app\backend", ``
+    "app\frontend", ``
+    "config", ``
+    "docs", ``
+    "scripts", ``
+    "tests"
+tree /f
+```powershell
+git status
+git diff -- .gitignore README.md
+git restore .gitignore
+git diff -- .gitignore
+Add-Content .gitignore "`n*.bin"
+git diff -- .gitignore
+Get-Content .gitignore | Select-Object -Last 10
+git diff -- README.md
+Get-Content README.md
+@"`
+`
+## Status`
+`
+🚧 Early development — ORION v0.1`
+`
+## License`
+`
+TBD`
+"@ | Add-Content README.md
+Get-Content README.md
+@"`
+# ORION`
+`
+**Portable, private, cross-platform AI assistant.**`
+`
+ORION is a local-first AI assistant designed to run from portable storage on Windows and Linux.`
+`
+## Goals`
+`
+- Lightweight local LLM inference`
+- Browser-based interface`
+- Multi-user authentication`
+- Isolated conversation history`
+- Offline-first operation`
+- Optional OpenRouter integration`
+- Portable Windows and Linux runtime`
+- Minimal external dependencies`
+`
+## Project Structure`
+`
+````text`
+app/        Application source`
+config/     Configuration`
+docs/       Documentation`
+scripts/    Development and build scripts`
+tests/      Automated tests`
+Status`
+`
+Early development - ORION v0.1`
+License`
+`
+TBD`
+"@ | Set-Content README.md -Encoding utf8
+Get-Content README.md
+$readme = @(`
+    '# ORION'`
+    ''`
+    '**Portable, private, cross-platform AI assistant.**'`
+    ''`
+    'ORION is a local-first AI assistant designed to run from portable storage on Windows and Linux.'`
+    ''`
+    '## Goals'`
+    ''`
+    '- Lightweight local LLM inference'`
+    '- Browser-based interface'`
+    '- Multi-user authentication'`
+    '- Isolated conversation history'`
+    '- Offline-first operation'`
+    '- Optional OpenRouter integration'`
+    '- Portable Windows and Linux runtime'`
+    '- Minimal external dependencies'`
+    ''`
+    '## Project Structure'`
+    ''`
+    '```text'`
+    'app/        Application source'`
+    'config/     Configuration'`
+    'docs/       Documentation'`
+    'scripts/    Development and build scripts'`
+    'tests/      Automated tests'`
+    '```'`
+    ''`
+    '## Status'`
+    ''`
+    'Early development - ORION v0.1'`
+    ''`
+    '## License'`
+    ''`
+    'TBD'`
+)
+$readme | Set-Content README.md -Encoding utf8
+$readme = @(`
+    '# ORION'`
+    ''`
+    '**Portable, private, cross-platform AI assistant.**'`
+    ''`
+    'ORION is a local-first AI assistant designed to run from portable storage on Windows and Linux.'`
+    ''`
+    '## Goals'`
+    ''`
+    '- Lightweight local LLM inference'`
+    '- Browser-based interface'`
+    '- Multi-user authentication'`
+    '- Isolated conversation history'`
+    '- Offline-first operation'`
+    '- Optional OpenRouter integration'`
+    '- Portable Windows and Linux runtime'`
+    '- Minimal external dependencies'`
+    ''`
+    '## Project Structure'`
+    ''`
+    '```text'`
+    'app/        Application source'`
+    'config/     Configuration'`
+    'docs/       Documentation'`
+    'scripts/    Development and build scripts'`
+    'tests/      Automated tests'`
+    '```'`
+    ''`
+    '## Status'`
+    ''`
+    'Early development - ORION v0.1'`
+    ''`
+    '## License'`
+    ''`
+    'TBD'`
+)
+$readme | Set-Content README.md -Encoding utf8
+Get-Content README.md
+git diff --check
+git status
+git difff
+git diff
+git diff -- README.md
+git status --short
+$content = Get-Content README.md -Raw
+[System.IO.File]::WriteAllText(`
+    (Join-Path (Get-Location) "README.md"),`
+    $content,`
+    (New-Object System.Text.UTF8Encoding($false))`
+)
+git diff -- README.md
+git diff --check
+git add .gitignore README.md
+git status
+git commit -m "Initialize ORION project foundation"
+git push origin main
+git status
+python --version
+py --version
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe --version
+.\.venv\Scripts\python.exe -m pip --version
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+@(`
+    "fastapi"`
+    "uvicorn[standard]"`
+    "pydantic"`
+    "pwdlib[argon2]"`
+    "itsdangerous"`
+) | Set-Content requirements.txt
+Get-Content requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -c "import fastapi, uvicorn, pydantic, pwdlib, itsdangerous; print('ORION backend dependencies OK')"
+python -m pip freeze > requirements-lock.txt
+git status
+git add requirements.txt requirements-lock.txt
+git commit -m "Set up Python backend dependencies"
+git push origin main
+git status
+New-Item -ItemType File -Force -Path "app\__init__.py", "app\backend\__init__.py", "app\backend\main.py"
+python -m uvicorn app.backend.main:app --reload
+git status
+git add .gitignore app/
+git status
+git commit -m "Add initial ORION backend"
+git push origin main
+git status
+python -m pip install sqlalchemy
+Add-Content requirements.txt "sqlalchemy"
+python -m pip freeze > requirements-lock.txt
+python -c "import sqlalchemy; print(sqlalchemy.__version__)"
+dir .\app\backend\
+dir .\app\backend\models\
+Select-String "SQLAlchemy" requirements.txt, requirements-lock.txt
+python -c "from app.backend.database import engine; print(engine.url)"
+cd .\data\
+dir
+python -m uvicorn app.backend.main:app --reload
+cd ..
+python -m uvicorn app.backend.main:app --reload
+cd D:\Orion\
+python -c "from app.backend.database import engine; from sqlalchemy import inspect; print(inspect(engine).get_table_names())"
+python -m pip install pytest
+Add-Content requirements.txt "pytest"
+python -m pip freeze > requirements-lock.txt
+python -m pytest tests/test_database.py -v
+python -m pip install alembic
+Add-Content requirements.txt "alembic"
+python -m pip freeze > requirements-lock.txt
+Select-String "alembic" requirements.txt, requirements-lock.txt
+alembic init migrations
+alembic revision --autogenerate -m "Create initial database schema"
+Remove-Item .\data\orion.db
+Remove-Item .\migrations\versions\264b071fc01d_create_initial_database_schema.py
+alembic revision --autogenerate -m "Create initial database schema"
+alembic upgrade head
+python -c "from app.backend.database import engine; from sqlalchemy import inspect; print(inspect(engine).get_table_names())"
+python -m pytest tests/test_database.py -v
+git status
+git status --short
+git diff --stat
+git diff --cached --stat
+git status --short
+git add .gitignore app/backend/database.py app/backend/main.py app/backend/models/ tests/test_database.py requirements.txt requirements-lock.txt alembic.ini migrations/
+git status
+git commit -m "Add database models and migrations"
+git push origin main
+git status
+python -m pytest tests/test_auth.py -v
+python -m uvicorn app.backend.main:app --reload
+python -m pytest tests/test_auth_api.py -v
+python -m pip install httpx2
+python -m pip show httpx2
+python -m pytest tests/test_auth_api.py -v
+python -m pip freeze > requirements-lock.txt
+Get-Content .\requirements.txt
+Add-Content requirements.txt "httpx2"
+Get-Content requirements.txt
+python -m pip freeze > requirements-lock.txt
+git status
+git add app/backend/auth/ app/backend/main.py tests/test_auth.py tests/test_auth_api.py requirements.txt requirements-lock.txt
+git status
+python -m pytest -v
+git commit -m "Add authentication foundation"
+git push origin main
+git status
+python -m pytest tests/test_session.py -v
+python -m uvicorn app.backend.main:app --reload
+python -m pytest tests/test_session.py -v
+python -m pytest -v
+python -m pytest tests/test_auth_session_api.py -v
+python -c "from app.backend.auth.session import create_session,get_user_id; t=create_session(123); print(t); print(get_user_id(t))"
+python -m pytest tests/test_auth_session_api.py::test_session_authenticates_me -v -s
+python -m pytest tests/test_session.py -v
+python -m pytest tests/test_auth_session_api.py -v
+python -m pytest -v
+git status
+git add app/backend/auth/routes.py app/backend/auth/session.py tests/test_auth_session_api.py tests/test_session.py
+git status
+git diff --cached --stat
+git diff --cached --check
+git commit -m "Add authenticated sessions"
+git push origin main
+git status
+python -m pytest tests/test_conversations.py -v
+Get-Content .\app\backend\models\__init__.py
+Get-Content .\app\backend\database.py
+Get-Content .\app\backend\models\conversation.py
+python -m pytest tests/test_conversations.py -v
+python -m uvicorn app.backend.main:app --reload
+python -m pytest tests/test_conversations_api.py -v
+python -m pytest -v
+Get-Content .\app\backend\models\message.py
+python -m pytest tests/test_messages.py -v
+python -m uvicorn app.backend.main:app --reload
+python -m pytest tests/test_messages_api.py -v
+python -m pytest -v
+git status
+git diff --stat
+git add app/backend/conversations/ app/backend/messages/ tests/test_conversations.py tests/test_conversations_api.py tests/test_messages.py tests/test_messages_api.py app/backend/main.py
+git status
+git commit -m "Add conversation and message APIs"
+git push origin main
+git status
+python -m pytest tests/test_ai.py -v
+python -m pytest tests/test_messages_api.py -v
+python -m pytest -v
+Get-Content .\app\backend\messages\routes.py
+python -m pytest tests/test_messages_api.py -v
+Get-Content .\app\backend\messages\service.py
+python -m pytest tests/test_messages.py tests/test_messages_api.py -v
+python -m pytest tests/test_messages_api.py -v
+Get-Content .\app\backend\ai\service.py
+Get-Content .\app\backend\ai\base.py
+Get-Content .\app\backend\ai\provider.py
+Get-Content .\tests\test_ai.py
+Get-ChildItem .\app\backend\ai\
+python -m pytest tests/test_messages_api.py -v
+Get-Content .\app\backend\messages\routes.py
+Get-Content .\app\backend\messages\service.py
+python -m pytest tests/test_messages_api.py -v
+python -m pytest -v
+git status
+git diff --cached --check
+git add app/backend/ai/ app/backend/messages/ tests/test_ai.py tests/test_messages_api.py
+git diff --cached --check
+git commit -m "Add AI responses to messages"
+git push origin main
+git status
+mkdir frontend
+mkdir frontend\static
+mkdir frontend\templates
+Get-Content .\app\backend\main.py
+python -m pip install jinja2
+Add-Content requirements.txt "jinja2"
+python -m pip freeze > requirements-lock.txt
+Get-Content .\requirements.txt
+python -m uvicorn app.backend.main:app --reload
+Get-ChildItem .\app -Recurse -Directory
+Get-ChildItem .\app\frontend -Force
+dir D:\Orion\app\frontend
+dir
+cd .\frontend\
+dir
+python -c "from app.backend.main import app; print('OK')"
+cd ..
+python -c "from app.backend.main import app; print('OK')"
+Get-Content main.py
+Get-Content .\app\backend\main.py
+python -c "from app.frontend.routes import router; print('Frontend router OK')"
+python -c "from app.backend.main import app; print('ORION OK')"
+python -m uvicorn app.backend.main:app --reload
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User; db=SessionLocal(); users=db.query(User).all(); print([(u.id, u.username) for u in users]); db.close()"
+Get-Content .\app\backend\auth\routes.py
+Get-Content .\app\backend\auth\service.py
+Get-ChildItem .\frontend -Recurse
+Get-Content .\frontend\routes.py
+Get-Content .app\frontend\routes.py
+Get-Content .\app\frontend\routes.py
+Get-Content .\app\frontend\templates\signup.html
+Get-Content .\frontend\templates\signup.html
+Get-Content .\frontend\static\signup.js
+python -m uvicorn app.backend.main:app --reload
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User; db=SessionLocal(); u=db.query(User).filter(User.username=='orion_demo').first(); print((u.id, u.username) if u else 'NOT FOUND'); db.close()"
+python -m uvicorn app.backend.main:app --reload
+clear
+Get-Content .\frontend\static\login.js
+Get-Content .\frontend\templates\login.html
+Get-Content .\app\backend\auth\session.py
+python -m uvicorn app.backend.main:app --reload
+Get-Content .\frontend\templates\app.html
+Get-ChildItem .\frontend\static
+python -m uvicorn app.backend.main:app --restart
+python -m uvicorn app.backend.main:app --releoad
+python -m uvicorn app.backend.main:app --reload
+Get-Content .\frontend\static\app.js
+python -m uvicorn app.backend.main:app --reload
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); db.query(Message).delete(); db.query(Conversation).delete(); db.query(User).delete(); db.commit(); print('Database cleaned.'); db.close()"
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); db.close()"
+pytest -q
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); db.close()"
+git status
+python -c "import os, sys; print(os.getcwd()); print(sys.executable); import app; print(app.__file__)"
+python -m pytest -q
+git add .
+git status
+git status --short
+git ls-files | Select-String -Pattern "\.db$|\.sqlite"
+git status --short --ignored
+git commit -m "Add ORION web interface and authentication pages"
+git status
+git push origin main
+git status
+Get-ChildItem .\app\backend -Recurse -File | Select-Object FullName
+Get-Content .\app\backend\conversations\service.py
+Get-Content .\app\backend\conversations\routes.py
+Get-Content .\app\backend\messages\routes.py
+Get-Content .\app\backend\messages\service.py
+Get-Content .\app\backend\models\conversation.py
+Get-Content .\app\backend\models\message.py
+Get-Content .\frontend\static\app.js
+Get-Content .\app\backend\ai\service.py
+Get-Content .\app\backend\ai\base.py
+Get-Content .\app\backend\ai\providers.py
+python -m pytest -q
+python -m uvicorn app.backend.main:app --reload
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); db.close()"
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User; db=SessionLocal(); users=db.query(User).all(); print('Total:', len(users)); [print(u.id, u.username) for u in users]; db.close()"
+python -m pytest -q
+Get-Content .\app\backend\database.py
+Get-Content .\tests\test_database.py
+clear
+Get-Content .\tests\test_auth_api.py
+Get-Content .\tests\test_auth_session_api.py
+Get-Content .\tests\test_conversations_api.py
+Get-Content .\tests\test_messages_api.py
+python -m pytest -q
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); db.close()"
+Get-Content .\tests\conftest.py
+python -m pytest -q
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); db.close()"
+python -m pytest -q
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); db.close()"
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User; db=SessionLocal(); users=db.query(User).all(); print('Total:', len(users)); print('Test users:', sum(1 for u in users if u.username.startswith(('api_test_','session_test_','conversation_api_','message_api_','test_')))); print('Other users:', [u.username for u in users if not u.username.startswith(('api_test_','session_test_','conversation_api_','message_api_','test_'))]); db.close()"
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); prefixes=('api_test_','session_test_','conversation_api_','message_api_','test_'); users=[u for u in db.query(User).all() if u.username.startswith(prefixes)]; user_ids=[u.id for u in users]; conversations=db.query(Conversation).filter(Conversation.user_id.in_(user_ids)).all() if user_ids else []; conversation_ids=[c.id for c in conversations]; deleted_messages=db.query(Message).filter(Message.conversation_id.in_(conversation_ids)).delete(synchronize_session=False) if conversation_ids else 0; deleted_conversations=db.query(Conversation).filter(Conversation.id.in_(conversation_ids)).delete(synchronize_session=False) if conversation_ids else 0; deleted_users=db.query(User).filter(User.id.in_(user_ids)).delete(synchronize_session=False) if user_ids else 0; db.commit(); print('Deleted users:', deleted_users); print('Deleted conversations:', deleted_conversations); print('Deleted messages:', deleted_messages); db.close()"
+python -c "from app.backend.database import SessionLocal; from app.backend.models import User, Conversation, Message; db=SessionLocal(); print('users:', db.query(User).count()); print('conversations:', db.query(Conversation).count()); print('messages:', db.query(Message).count()); print('users:', [u.username for u in db.query(User).all()]); db.close()"
+git status
+git diff -- tests/conftest.py tests/test_database.py
+git add .
+git status
+git commit -m "Isolate tests from development database"
+git push origin main
+git status
+python -m pytest -q
+Get-Content .\tests\test_messages_api.py | Select-Object -Skip 290 -First 35
+python -m pytest -q
+git status
+git add.
+git add .
+git commit -m "Secure multi-turn conversation context"
+git push
+python -m pytest -q
+Get-Content ./app/backend/ai/service.py
+Get-Content ./app/backend/ai/providers.py
+python -m pytest -q
+Get-Content .\tests\test_messages.py
+python -m pytest -q
+clear
+python -m pytest -q
+clear
+python -m pytest -q
+Get-ChildItem .\Orion
+Get-ChildItem D:\Orion\
+python -m pytest -q
+dir app\backend\config.py app\backend\migrations_runner.py
+Expand-Archive -Path "$HOME\Downloads\orion-step1-changes.zip" -DestinationPath D:\Orion -Force
+dir app\backend\config.py app\backend\migrations_runner.py
+python -m pytest -q
+Expand-Archive -Path "$HOME\Downloads\orion-step1-fixes.zip" -DestinationPath D:\Orion -Force
+python -m pytest -q
+Expand-Archive -Path "C:\Users\SAGAR\Downloads\orion-step2.zip" -DestinationPath D:\Orion\ -Force
+python -m pytest -q
+Expand-Archive -Path "C:\Users\SAGAR\Downloads\orion-step3.zip" -DestinationPath D:\Orion\ -Force
+python -m pytest -q
+$env:ORION_AI_PROVIDER = "llama"
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+git status
+git diff --stat
+git diff --check
+python -m pytest
+git add .
+git status
+git diff --cached --stat
+git commit -m "Add local Llama AI runtime and streaming support"
+git push origin main
+git status --short
+git status
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+exit
+cd D:\Orion\
+Expand-Archive -Path "$HOME\Downloads\orion-step4.zip" -DestinationPath D:\Orion -Force
+python -m pytest -q
+.\venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.\.venv\Scripts\Activate.ps1
+python -m pytest -q
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+Expand-Archive -Path "$HOME\Downloads\orion-step5-markdown.zip" -DestinationPath D:\Orion -Force
+python -m pytest -q
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+git status
+git diff
+git add .
+git status
+git commit -m "code blocks are plain monochrome"
+git push
+git push -u origin main
+git push
+git status
+D:\Orion\
+cd D:\Orion\
+.\.venv\Scripts\Activate.ps1
+Expand-Archive -Path "$HOME\Downloads\orion-step6-attach-ui.zip" -DestinationPath D:\Orion -Force
+python -m pytest -q
+pip install pypdf
+pip freeze > requirements.txt
+Get-Content .\requirements.txt
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+Expand-Archive -Path "$HOME\Downloads\orion-attachments-backend.zip" -DestinationPath D:\Orion -Force
+python -m pytest -q
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+Expand-Archive -Path "$HOME\Downloads\orion-delete-history.zip" -DestinationPath D:\Orion -Force
+python -m pytest -q
+python -m uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+git status
+git diff
+git add .
+git status
+git commit -m "File Upload & Clear history"
+git push
+git status
+cd D:\Orion\
+.\.venv\Scripts\Activate.ps1
+clear
+git status
+exit
+cd D:\Orion\
+.\.venv\Scripts\Activate.ps1
+Copy-Item (Get-PSReadLineOption).HistorySavePath -Destination .\history.txt

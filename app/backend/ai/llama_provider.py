@@ -99,6 +99,11 @@ class LlamaServerProvider(AIProvider):
         # One model, one generation at a time; others queue here.
         self._generation_lock = threading.Lock()
 
+    @property
+    def busy(self) -> bool:
+        """True while a reply is being generated."""
+        return self._generation_lock.locked()
+
     # -- AIProvider --------------------------------------------------------
 
     def generate(self, messages: list[dict[str, str]]) -> str:
@@ -170,7 +175,10 @@ class LlamaServerProvider(AIProvider):
                     "POST",
                     "/v1/chat/completions",
                     body=body,
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.manager.api_key}",
+                    },
                 )
                 response = connection.getresponse()
             except (OSError, http.client.HTTPException) as exc:

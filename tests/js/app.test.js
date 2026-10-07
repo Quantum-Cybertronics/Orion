@@ -298,5 +298,45 @@ const streamRoute = events => async url => url.endsWith("/stream") ? okResponse(
   r = banner({ provider: "llama", state: "error", detail: "boom" }); check("banner: error", r[1] === "ai-banner error" && /boom/.test(r[2]));
   r = banner({ provider: "echo", state: "ready", detail: "Echo mode (no AI model)." }); check("banner: echo note", !r[0] && /Echo/.test(r[2]));
 
+  // 11 model dropdown
+  const sel = get("model-select");
+  const GB = 1024 ** 3, MB = 1024 ** 2;
+  let serverModel = "b.gguf", serverState = "ready", posted = null, postReply = null;
+  const st = (extra = {}) => ({ provider: "llama", state: serverState, model: serverModel, can_switch: true,
+    models: [{ id: "a.gguf", name: "a", size: 2 * GB }, { id: "b.gguf", name: "b", size: 300 * MB }], ...extra });
+  const render = s => run(`modelListKey = ""; renderModels(${JSON.stringify(s)})`);
+  const opts = () => sel.children.map(o => o.textContent);
+
+  render(st());
+  check("models: one option per model with its size", JSON.stringify(opts()) === JSON.stringify(["a (2.0 GB)", "b (300 MB)"]), opts());
+  check("models: running model selected and enabled", sel.value === "b.gguf" && sel.disabled === false);
+  render(st({ can_switch: false })); check("models: disabled when switching is unavailable", sel.disabled === true);
+  render({ provider: "echo", state: "ready", models: [], can_switch: false });
+  check("models: empty folder -> 'No models found', disabled", JSON.stringify(opts()) === JSON.stringify(["No models found"]) && sel.disabled === true);
+  render(st({ model: "gone.gguf" })); check("models: a running model missing from the folder is still shown", opts().length === 3 && sel.value === "gone.gguf");
+
+  const children = sel.children;
+  run(`renderModels(${JSON.stringify(st({ model: "gone.gguf" }))})`);
+  check("models: an unchanged list is not rebuilt (keeps an open dropdown open)", sel.children === children);
+
+  fetchImpl = async (url, opts) => {
+    if (url === "/ai/model") { posted = JSON.parse(opts.body); return postReply(); }
+    return { ok: true, status: 200, json: async () => st({ model: serverModel }) };
+  };
+
+  serverModel = "b.gguf"; render(st());
+  postReply = () => { serverModel = "a.gguf"; serverState = "loading"; return { ok: true, status: 200, json: async () => st({ state: "loading", model: "a.gguf" }) }; };
+  sel.value = "a.gguf"; await sel.listeners.change[0](); await settle();
+  check("switch: POSTs the chosen file name", posted && posted.model === "a.gguf", JSON.stringify(posted));
+  check("switch: dropdown shows the new model and the loading banner appears", sel.value === "a.gguf" && /Loading/.test(get("ai-banner").textContent) && /a\.gguf/.test(get("ai-banner").textContent));
+  clearTimeout(run("statusTimer")); serverState = "ready";
+
+  serverModel = "a.gguf"; render(st()); alerts.length = 0;
+  postReply = () => ({ ok: false, status: 409, json: async () => ({ detail: "ORION is writing a reply right now." }) });
+  sel.value = "b.gguf"; await sel.listeners.change[0](); await settle();
+  check("switch refused: the reason is shown", alerts[0] === "ORION is writing a reply right now.", alerts[0]);
+  check("switch refused: dropdown snaps back to the model that is really loaded", sel.value === "a.gguf" && sel.disabled === false);
+  clearTimeout(run("statusTimer"));
+
   console.log(failures ? failures + " FAILED" : "ALL PASSED"); process.exit(failures ? 1 : 0);
 })();

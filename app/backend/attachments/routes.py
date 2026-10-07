@@ -23,6 +23,11 @@ from app.backend.database import get_db
 from app.backend.messages.service import ConversationNotFoundError
 from app.backend.models import User
 
+# HTTP 413. Starlette renamed its constant for this code (the old name now
+# emits a deprecation warning, the new one is missing from older versions),
+# so use the number itself.
+PAYLOAD_TOO_LARGE = 413
+
 router = APIRouter(
     prefix="/conversations/{conversation_id}/attachments",
     tags=["Attachments"],
@@ -37,7 +42,7 @@ def _too_large() -> HTTPException:
     limit_mb = MAX_UPLOAD_BYTES / (1024 * 1024)
 
     return HTTPException(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        status_code=PAYLOAD_TOO_LARGE,
         detail=f"File is too large (limit {limit_mb:g} MB).",
     )
 
@@ -106,7 +111,7 @@ async def upload(
         raise _not_found() from exc
     except AttachmentLimitError as exc:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=PAYLOAD_TOO_LARGE,
             detail=str(exc),
         ) from exc
 

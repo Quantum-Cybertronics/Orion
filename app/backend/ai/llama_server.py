@@ -9,6 +9,7 @@ import http.client
 import logging
 import os
 import platform
+import secrets
 import socket
 import subprocess
 import sys
@@ -16,6 +17,8 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+
+from app.backend.ai.model_catalog import list_models
 
 logger = logging.getLogger("orion.llama")
 
@@ -75,12 +78,9 @@ def find_model(base_dir: Path, override: str | None = None) -> Path | None:
         path = Path(override).expanduser()
         return path if path.is_file() else None
 
-    models_dir = base_dir / "models"
+    models = list_models(base_dir)
 
-    if not models_dir.is_dir():
-        return None
-
-    return next(iter(sorted(models_dir.glob("*.gguf"))), None)
+    return models[0].path if models else None
 
 
 # --------------------------------------------------------------------------
@@ -122,6 +122,11 @@ class LlamaServerManager:
         self.log_path = log_path
         self.host = host
         self._command_builder = command_builder
+
+        # llama-server listens on localhost, but any web page open in the
+        # user's browser can still send requests there. A random key that only
+        # ORION knows makes those requests fail with 401.
+        self.api_key = secrets.token_urlsafe(32)
 
         self._lock = threading.RLock()
         self._ready = threading.Event()
@@ -187,6 +192,17 @@ class LlamaServerManager:
             )
             self._thread.start()
 
+    def switch_model(self, model: Path) -> None:
+        """Stop the running server and start it again on a different model.
+
+        Returns immediately; the new model loads in the background, so watch
+        ``state`` (``loading`` -> ``ready`` or ``error``).
+        """
+        with self._lock:
+            self.stop()
+            self.model = model
+            self.start()
+
     def wait_ready(self, timeout: float | None = None) -> int:
         """Return the server port once it is ready, (re)starting it if needed."""
         with self._lock:
@@ -246,7 +262,9 @@ class LlamaServerManager:
             command = self.build_command(port)
             cwd = self.binary.parent if self.binary is not None else None
 
-            kwargs: dict = {}
+            # Passed through the environment, not --api-key: command lines are
+            # visible to every user of the machine, the environment is not.
+            kwargs: dict = {"env": {**os.environ, "LLAMA_API_KEY": self.api_key}}
 
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -335,7 +353,11 @@ class LlamaServerManager:
         connection = http.client.HTTPConnection(self.host, port, timeout=2)
 
         try:
-            connection.request("GET", "/health")
+            connection.request(
+                "GET",
+                "/health",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
             return connection.getresponse().status == 200
         except OSError:
             return False  # not listening yet

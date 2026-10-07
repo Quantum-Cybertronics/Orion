@@ -7,6 +7,7 @@ const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const sendButton = document.getElementById("send-button");
 const aiBanner = document.getElementById("ai-banner");
+const modelSelect = document.getElementById("model-select");
 const chatElement = document.getElementById("chat");
 const attachButton = document.getElementById("attach-button");
 const fileInput = document.getElementById("file-input");
@@ -854,6 +855,8 @@ chatElement.addEventListener("drop", async (event) => {
 // ---- AI status banner ---------------------------------------------------
 
 let statusTimer = null;
+let lastStatus = null;   // newest /ai/status, used to restore the dropdown
+let modelListKey = "";   // what the dropdown currently shows
 
 
 function renderBanner(status) {
@@ -862,10 +865,11 @@ function renderBanner(status) {
 
     if (status.provider === "llama" && status.state !== "ready") {
         if (status.state === "error") {
-            text = `The AI model failed to start: ${status.detail || "unknown error"}. Restart ORION to try again.`;
+            text = `The AI model failed to start: ${status.detail || "unknown error"}. Choose another model or restart ORION to try again.`;
             kind = "error";
         } else {
-            text = "Loading the AI model... the first reply may take a moment.";
+            const name = status.model ? ` ${status.model}` : "";
+            text = `Loading the AI model${name}... the first reply may take a moment.`;
             kind = "info";
         }
     } else if (status.provider === "unavailable") {
@@ -882,6 +886,100 @@ function renderBanner(status) {
 }
 
 
+function formatModelSize(bytes) {
+    if (!bytes) {
+        return "";
+    }
+
+    const gb = bytes / (1024 ** 3);
+
+    return gb >= 1
+        ? `${gb.toFixed(1)} GB`
+        : `${Math.max(1, Math.round(bytes / (1024 ** 2)))} MB`;
+}
+
+
+function renderModels(status) {
+    const models = status.models || [];
+    const key = JSON.stringify([
+        models.map((model) => [model.id, model.size]),
+        status.model,
+        status.can_switch,
+    ]);
+
+    // Rebuilding an open <select> closes it, so only touch it on a change.
+    if (key === modelListKey) {
+        return;
+    }
+
+    modelListKey = key;
+    modelSelect.innerHTML = "";
+
+    const add = (value, label) => {
+        const option = document.createElement("option");
+
+        option.value = value;
+        option.textContent = label;
+        modelSelect.appendChild(option);
+    };
+
+    if (models.length === 0 && !status.model) {
+        add("", "No models found");
+        modelSelect.disabled = true;
+        modelSelect.title = "Put .gguf model files in ORION's models folder.";
+        return;
+    }
+
+    // The running model may have been deleted from the folder since it loaded.
+    if (status.model && !models.some((model) => model.id === status.model)) {
+        add(status.model, status.model);
+    }
+
+    for (const model of models) {
+        const size = formatModelSize(model.size);
+
+        add(model.id, size ? `${model.name} (${size})` : model.name);
+    }
+
+    modelSelect.value = status.model || models[0].id;
+    modelSelect.disabled = !status.can_switch;
+    modelSelect.title = status.can_switch
+        ? "Choose the AI model"
+        : "Switching models is not available right now.";
+}
+
+
+modelSelect.addEventListener("change", async () => {
+    const wanted = modelSelect.value;
+
+    modelSelect.disabled = true;
+
+    try {
+        const status = await apiRequest("/ai/model", {
+            method: "POST",
+            body: JSON.stringify({ model: wanted }),
+        });
+
+        lastStatus = status;
+        renderBanner(status);
+    } catch (error) {
+        console.error(error);
+
+        alert(
+            error instanceof Error
+                ? error.message
+                : "Unable to switch the model."
+        );
+    }
+
+    // Success or failure, show what the server says is really loaded.
+    modelListKey = "";
+    renderModels(lastStatus || { models: [] });
+
+    refreshAiStatus(); // polls quickly while the new model loads
+});
+
+
 async function refreshAiStatus() {
     clearTimeout(statusTimer);
 
@@ -890,7 +988,9 @@ async function refreshAiStatus() {
     try {
         const status = await apiRequest("/ai/status");
 
+        lastStatus = status;
         renderBanner(status);
+        renderModels(status);
 
         if (status.provider === "llama" && status.state === "loading") {
             delay = 1500; // keep checking until the model is ready

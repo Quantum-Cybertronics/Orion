@@ -36,14 +36,30 @@ runtime/llama/linux-x64/     unpack the llama.cpp "ubuntu-x64" release here
 models/                      one or more .gguf model files
 ```
 
-ORION finds `llama-server` anywhere under the folder for the current OS/CPU
-and uses the first `.gguf` in `models/`. With neither present it falls back
-to an echo stand-in and says so at `GET /ai/status`.
+ORION finds `llama-server` anywhere under the folder for the current OS/CPU.
+With no server or no model it falls back to an echo stand-in and says so at
+`GET /ai/status`.
+
+### Choosing a model
+
+Every `.gguf` in `models/` appears in the **Model** dropdown in the top bar.
+Pick one and ORION restarts the engine on it (the banner shows "Loading..."
+until it is ready). The choice is remembered in `data/selected_model.txt`; on
+first run the first file alphabetically is used.
+
+- New files show up within ~30 seconds, no restart needed. If `models/` was
+  empty at launch, adding a file and picking it brings the AI online.
+- Switching is refused while a reply is being written, and applies to everyone
+  using this ORION (there is one engine).
+- Vision projector files (`mmproj-*.gguf`) and the extra parts of split models
+  (`...-00002-of-00005.gguf`) are not listed; for a split model, pick part 1.
+- Only chat models work here. Image-generation models need a different engine.
+- Setting `ORION_MODEL_PATH` pins one model and disables the dropdown.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ORION_AI_PROVIDER` | `auto` | `auto`, `llama` (fail loudly if unusable) or `echo` |
-| `ORION_MODEL_PATH` | first `models/*.gguf` | use a specific model file |
+| `ORION_MODEL_PATH` | unset (use the dropdown) | pin one model file and disable the dropdown |
 | `ORION_LLAMA_SERVER` | `runtime/llama/<os-cpu>/` | use a specific llama-server |
 | `ORION_LLAMA_CTX` | `8192` | context window in tokens (also limits how much attached-file text fits) |
 | `ORION_MAX_UPLOAD_MB` | `5` | largest file that can be uploaded |

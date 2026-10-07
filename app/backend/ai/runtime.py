@@ -10,6 +10,7 @@ ORION_AI_PROVIDER:
 
 import logging
 import os
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,13 @@ from app.backend.ai.llama_server import (
     find_model,
     find_server_binary,
     platform_tag,
+)
+from app.backend.ai.model_catalog import (
+    ModelInfo,
+    choose_initial_model,
+    describe_model,
+    list_models,
+    save_selection,
 )
 from app.backend.ai.providers import EchoAIProvider, UnavailableAIProvider
 from app.backend.ai.service import AIService
@@ -66,6 +74,42 @@ def load_settings(env: Mapping[str, str] = os.environ) -> AISettings:
     )
 
 
+class ModelSwitchError(RuntimeError):
+    """The requested model change cannot happen (message is safe to show).
+
+    ``reason`` is one of: ``unavailable``, ``locked``, ``not_found``, ``busy``.
+    """
+
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def _make_llama(
+    settings: AISettings,
+    binary: Path,
+    model: Path,
+    data_dir: Path,
+) -> tuple[LlamaServerManager, LlamaServerProvider]:
+    manager = LlamaServerManager(
+        binary,
+        model,
+        ctx_size=settings.ctx_size,
+        threads=settings.threads,
+        startup_timeout=settings.startup_timeout,
+        log_path=data_dir / "llama-server.log",
+    )
+
+    provider = LlamaServerProvider(
+        manager,
+        ctx_size=settings.ctx_size,
+        max_tokens=settings.max_tokens,
+        temperature=settings.temperature,
+    )
+
+    return manager, provider
+
+
 class AIRuntime:
     def __init__(
         self,
@@ -75,6 +119,11 @@ class AIRuntime:
         model: Path | None = None,
         note: str | None = None,
         settings: AISettings | None = None,
+        *,
+        binary: Path | None = None,
+        base_dir: Path = BASE_DIR,
+        data_dir: Path = DATA_DIR,
+        model_locked: bool = False,
     ):
         self.provider = provider
         self.kind = kind  # "llama" | "echo" | "unavailable"
@@ -83,6 +132,13 @@ class AIRuntime:
         self.note = note
         self.service = AIService(provider)
         self.settings = settings or AISettings()
+
+        self.binary = binary
+        self.base_dir = base_dir
+        self.data_dir = data_dir
+        self.model_locked = model_locked  # pinned by ORION_MODEL_PATH
+
+        self._switch_lock = threading.Lock()
 
     def file_budget(self) -> FileBudget:
         """How much attached-file text fits in the model's context window."""
@@ -97,29 +153,126 @@ class AIRuntime:
         if self.manager is not None:
             self.manager.stop()
 
+    # -- model selection ---------------------------------------------------
+
+    @property
+    def busy(self) -> bool:
+        """True while a reply is being generated."""
+        return bool(getattr(self.provider, "busy", False))
+
+    @property
+    def can_switch(self) -> bool:
+        return (
+            self.settings.provider != "echo"
+            and self.binary is not None
+            and not self.model_locked
+        )
+
+    def available_models(self) -> list[ModelInfo]:
+        if self.model_locked and self.model is not None:
+            return [describe_model(self.model)]
+
+        return list_models(self.base_dir)
+
+    def select_model(self, model_id: str) -> dict:
+        """Switch to the named model from ``models/`` and return the new status.
+
+        The new model loads in the background; the status shows ``loading``
+        until it is ready. The choice is remembered across restarts.
+        """
+        if self.settings.provider == "echo" or self.binary is None:
+            raise ModelSwitchError(
+                "unavailable",
+                "The local AI engine is not available, so models cannot be switched.",
+            )
+
+        if self.model_locked:
+            raise ModelSwitchError(
+                "locked",
+                "The model is fixed by the ORION_MODEL_PATH setting.",
+            )
+
+        chosen = next(
+            (m for m in list_models(self.base_dir) if m.id == model_id), None
+        )
+
+        if chosen is None:
+            raise ModelSwitchError(
+                "not_found",
+                f"Model {model_id!r} was not found in the models folder.",
+            )
+
+        with self._switch_lock:
+            already_running = (
+                self.manager is not None
+                and self.model == chosen.path
+                and self.manager.state in ("loading", "ready")
+            )
+
+            if already_running:
+                return self.status()
+
+            if self.busy:
+                raise ModelSwitchError(
+                    "busy",
+                    "ORION is writing a reply right now. "
+                    "Wait for it to finish, then switch models.",
+                )
+
+            if self.manager is None:
+                self._attach_llama(chosen.path)
+            else:
+                self.manager.switch_model(chosen.path)
+
+            self.model = chosen.path
+            self.note = None
+
+        save_selection(self.data_dir, chosen.id)
+        logger.info("Switched model to %s", chosen.id)
+
+        return self.status()
+
+    def _attach_llama(self, model: Path) -> None:
+        """Bring up llama-server for a runtime that started without a model."""
+        manager, provider = _make_llama(
+            self.settings, self.binary, model, self.data_dir
+        )
+
+        self.manager = manager
+        self.provider = provider
+        self.service = AIService(provider)
+        self.kind = "llama"
+        manager.start()
+
+    # -- status ------------------------------------------------------------
+
     def status(self) -> dict:
         if self.kind == "llama" and self.manager is not None:
-            return {
+            info = {
                 "provider": "llama",
                 "state": self.manager.state,
                 "detail": self.manager.error,
                 "model": self.model.name if self.model else None,
             }
-
-        if self.kind == "unavailable":
-            return {
+        elif self.kind == "unavailable":
+            info = {
                 "provider": "unavailable",
                 "state": "error",
                 "detail": self.note,
                 "model": None,
             }
+        else:
+            info = {
+                "provider": "echo",
+                "state": "ready",
+                "detail": self.note,
+                "model": None,
+            }
 
-        return {
-            "provider": "echo",
-            "state": "ready",
-            "detail": self.note,
-            "model": None,
-        }
+        info["models"] = [m.to_dict() for m in self.available_models()]
+        info["can_switch"] = self.can_switch
+
+        return info
 
 
 def build_runtime(
@@ -127,13 +280,22 @@ def build_runtime(
     base_dir: Path = BASE_DIR,
     data_dir: Path = DATA_DIR,
 ) -> AIRuntime:
+    common = {"settings": settings, "base_dir": base_dir, "data_dir": data_dir}
+
     if settings.provider == "echo":
         return AIRuntime(
-            EchoAIProvider(), "echo", note="Echo mode (no AI model).", settings=settings
+            EchoAIProvider(), "echo", note="Echo mode (no AI model).", **common
         )
 
     binary = find_server_binary(base_dir, settings.server_path)
-    model = find_model(base_dir, settings.model_path)
+
+    if settings.model_path:
+        # An explicit path pins the model; the dropdown cannot change it.
+        model = find_model(base_dir, settings.model_path)
+        pinned = model is not None
+    else:
+        model = choose_initial_model(base_dir, data_dir)
+        pinned = False
 
     missing = []
 
@@ -151,32 +313,32 @@ def build_runtime(
         if settings.provider == "llama":
             logger.error(reason)
             return AIRuntime(
-                UnavailableAIProvider(reason), "unavailable", note=reason, settings=settings
+                UnavailableAIProvider(reason),
+                "unavailable",
+                note=reason,
+                binary=binary,
+                **common,
             )
 
         logger.warning("%s Falling back to echo mode.", reason)
         return AIRuntime(
-            EchoAIProvider(), "echo", note=f"Echo mode. {reason}", settings=settings
+            EchoAIProvider(),
+            "echo",
+            note=f"Echo mode. {reason}",
+            binary=binary,
+            **common,
         )
 
-    manager = LlamaServerManager(
-        binary,
-        model,
-        ctx_size=settings.ctx_size,
-        threads=settings.threads,
-        startup_timeout=settings.startup_timeout,
-        log_path=data_dir / "llama-server.log",
-    )
-
-    provider = LlamaServerProvider(
-        manager,
-        ctx_size=settings.ctx_size,
-        max_tokens=settings.max_tokens,
-        temperature=settings.temperature,
-    )
+    manager, provider = _make_llama(settings, binary, model, data_dir)
 
     return AIRuntime(
-        provider, "llama", manager=manager, model=model, settings=settings
+        provider,
+        "llama",
+        manager=manager,
+        model=model,
+        binary=binary,
+        model_locked=pinned,
+        **common,
     )
 
 

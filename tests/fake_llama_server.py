@@ -8,6 +8,7 @@ Send the message ``__error__`` to get an HTTP 400 like a context overflow.
 
 import argparse
 import json
+import os
 import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,6 +53,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         request = json.loads(self.rfile.read(length) or b"{}")
+
+        # Like the real server: /health is open, everything else needs the key.
+        key = os.environ.get("LLAMA_API_KEY")
+
+        if key and self.headers.get("Authorization") != f"Bearer {key}":
+            return self._json(401, {"error": {"message": "Invalid API Key"}})
+
         messages = request.get("messages", [])
         last = messages[-1]["content"] if messages else ""
 

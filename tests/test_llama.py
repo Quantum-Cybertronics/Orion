@@ -1,3 +1,5 @@
+import http.client
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -355,3 +357,39 @@ def test_clock_is_read_per_request(manager):
     second = provider._prepare(message)[0]["content"]
 
     assert "03 October" in first and "04 October" in second
+
+
+# ----------------------------------------------------------------- api key
+
+def test_llama_server_rejects_requests_without_the_key(manager):
+    server = manager()
+    port = server.wait_ready()
+
+    def post(headers: dict) -> int:
+        connection = http.client.HTTPConnection(server.host, port, timeout=5)
+        connection.request(
+            "POST",
+            "/v1/chat/completions",
+            body=json.dumps({"messages": [{"role": "user", "content": "hi"}]}),
+            headers={"Content-Type": "application/json", **headers},
+        )
+
+        try:
+            return connection.getresponse().status
+        finally:
+            connection.close()
+
+    assert post({}) == 401
+    assert post({"Authorization": "Bearer wrong"}) == 401
+    assert post({"Authorization": f"Bearer {server.api_key}"}) == 200
+
+
+def test_api_key_is_random_and_kept_off_the_command_line(manager):
+    first, second = manager(), manager()
+
+    assert first.api_key != second.api_key
+    assert len(first.api_key) >= 32
+
+    real = LlamaServerManager(Path("llama-server"), Path("model.gguf"))
+
+    assert real.api_key not in " ".join(real.build_command(1234))
