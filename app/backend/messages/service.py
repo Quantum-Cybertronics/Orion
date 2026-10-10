@@ -12,6 +12,10 @@ class ConversationNotFoundError(Exception):
     pass
 
 
+class NothingToRegenerateError(Exception):
+    """The conversation has no user message to answer."""
+
+
 MAX_CONVERSATION_TITLE_LENGTH = 80
 
 # Insertion order. created_at alone can tie on platforms with a coarse clock
@@ -44,6 +48,30 @@ def get_owned_conversation(
         raise ConversationNotFoundError
 
     return conversation
+
+
+def _build_history(
+    db: Session,
+    conversation_id: str,
+    messages: list[Message],
+) -> list[dict[str, str]]:
+    """What gets sent to the AI: the messages, plus any attached files."""
+    history = [
+        {
+            "role": message.role,
+            "content": message.content,
+        }
+        for message in messages
+    ]
+
+    # Attached files ride along as a system message on every turn. They are
+    # not stored as chat messages, so they never appear in the transcript.
+    file_context = build_file_context(load_attachments(db, conversation_id))
+
+    if file_context:
+        history.insert(0, {"role": "system", "content": file_context})
+
+    return history
 
 
 def create_user_message(
@@ -116,29 +144,60 @@ def begin_user_turn(
         .order_by(*MESSAGE_ORDER)
     )
 
-    history = [
-        {
-            "role": message.role,
-            "content": message.content,
-        }
-        for message in db.scalars(statement).all()
-    ]
-
-    # Attached files ride along as a system message on every turn. They are
-    # not stored as chat messages, so they never appear in the transcript.
-    file_context = build_file_context(load_attachments(db, conversation.id))
-
-    if file_context:
-        history.insert(0, {"role": "system", "content": file_context})
+    history = _build_history(db, conversation.id, list(db.scalars(statement).all()))
 
     return user_message, history
+
+
+def begin_regeneration(
+    db: Session,
+    user_id: str,
+    conversation_id: str,
+) -> tuple[list[dict[str, str]], str | None]:
+    """Prepare to answer the last user message again.
+
+    Returns the history to send (ending with that user message) and the id
+    of the assistant reply it will replace, or ``None`` if the last message
+    is the user's own (its reply never got saved). Nothing is deleted here:
+    the old reply is only removed once the new one is saved, so a failed
+    regeneration never costs the user their existing answer.
+    """
+    conversation = get_owned_conversation(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+    statement = (
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(*MESSAGE_ORDER)
+    )
+
+    messages = list(db.scalars(statement).all())
+    replaces: str | None = None
+
+    if messages and messages[-1].role == "assistant":
+        replaces = messages[-1].id
+        messages = messages[:-1]
+
+    if not messages or messages[-1].role != "user":
+        raise NothingToRegenerateError
+
+    return _build_history(db, conversation.id, messages), replaces
 
 
 def save_assistant_message(
     db: Session,
     conversation_id: str,
     content: str,
+    replace_message_id: str | None = None,
 ) -> Message:
+    """Save a reply. With ``replace_message_id``, swap it for that old reply.
+
+    The swap is one transaction: the new reply exists and the old one is gone,
+    or neither change happened.
+    """
     conversation = db.get(Conversation, conversation_id)
 
     if conversation is None:
@@ -154,6 +213,18 @@ def save_assistant_message(
     conversation.updated_at = datetime.now(timezone.utc)  # last activity
 
     db.add(assistant_message)
+
+    if replace_message_id:
+        old = db.get(Message, replace_message_id)
+
+        # Only ever replaces an assistant reply in this same conversation.
+        if (
+            old is not None
+            and old.conversation_id == conversation_id
+            and old.role == "assistant"
+        ):
+            db.delete(old)
+
     db.commit()
     db.refresh(assistant_message)
 

@@ -16,6 +16,8 @@ from app.backend.database import get_db
 from app.backend.models import User
 from app.backend.messages.service import (
     ConversationNotFoundError,
+    NothingToRegenerateError,
+    begin_regeneration,
     begin_user_turn,
     create_user_message,
     create_message_with_assistant,
@@ -80,48 +82,21 @@ def create(
         ) from exc
 
 
-@router.post("/stream")
-def create_streaming(
+def _stream_response(
+    *,
+    engine,
     conversation_id: str,
-    payload: CreateMessageRequest,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    ai_service: AIService = Depends(get_ai_service),
-):
-    """Save the user's message, then stream the reply as server-sent events.
+    history: list[dict[str, str]],
+    ai_service: AIService,
+    first_event: dict | None = None,
+    replace_message_id: str | None = None,
+) -> StreamingResponse:
+    """Stream a reply as server-sent events and save it when it ends.
 
-    Events (one JSON object per ``data:`` line):
-      user_message  the saved user message
-      delta         a piece of the reply text
-      done          the reply finished and was saved
-      error         generation failed; any partial reply is kept
+    ``first_event`` is sent before any text (the saved user message).
+    ``replace_message_id`` swaps that older assistant reply for the new one,
+    but only if the new reply has some text (see ``save_assistant_message``).
     """
-    try:
-        user_message, history = begin_user_turn(
-            db,
-            user_id=user.id,
-            conversation_id=conversation_id,
-            content=payload.content,
-            ai_service=ai_service,
-        )
-    except ConversationNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found.",
-        ) from exc
-
-    # The generator outlives this request's dependencies, so it opens its own
-    # short-lived sessions on the same database instead of reusing `db`.
-    engine = db.get_bind()
-
-    user_event = {
-        "type": "user_message",
-        "id": user_message.id,
-        "conversation_id": user_message.conversation_id,
-        "role": user_message.role,
-        "content": user_message.content,
-        "created_at": user_message.created_at.isoformat(),
-    }
 
     def save_reply(parts: list[str]):
         content = "".join(parts)
@@ -135,6 +110,7 @@ def create_streaming(
                     session,
                     conversation_id=conversation_id,
                     content=content,
+                    replace_message_id=replace_message_id,
                 )
         except ConversationNotFoundError:
             return None  # conversation was deleted while replying
@@ -142,7 +118,8 @@ def create_streaming(
     def event_stream() -> Iterator[str]:
         parts: list[str] = []
 
-        yield _sse(user_event)
+        if first_event is not None:
+            yield _sse(first_event)
 
         try:
             for chunk in ai_service.stream_reply(history):
@@ -178,6 +155,94 @@ def create_streaming(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post("/stream")
+def create_streaming(
+    conversation_id: str,
+    payload: CreateMessageRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    """Save the user's message, then stream the reply as server-sent events.
+
+    Events (one JSON object per ``data:`` line):
+      user_message  the saved user message
+      delta         a piece of the reply text
+      done          the reply finished and was saved
+      error         generation failed; any partial reply is kept
+    """
+    try:
+        user_message, history = begin_user_turn(
+            db,
+            user_id=user.id,
+            conversation_id=conversation_id,
+            content=payload.content,
+            ai_service=ai_service,
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        ) from exc
+
+    # The generator outlives this request's dependencies, so it opens its own
+    # short-lived sessions on the same database instead of reusing `db`.
+    user_event = {
+        "type": "user_message",
+        "id": user_message.id,
+        "conversation_id": user_message.conversation_id,
+        "role": user_message.role,
+        "content": user_message.content,
+        "created_at": user_message.created_at.isoformat(),
+    }
+
+    return _stream_response(
+        engine=db.get_bind(),
+        conversation_id=conversation_id,
+        history=history,
+        ai_service=ai_service,
+        first_event=user_event,
+    )
+
+
+@router.post("/regenerate")
+def regenerate(
+    conversation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    ai_service: AIService = Depends(get_ai_service),
+):
+    """Answer the last user message again, streaming like ``/stream``.
+
+    The previous reply is replaced only once the new one has been saved, so
+    if generation fails before producing any text the old answer stays.
+    """
+    try:
+        history, replaces = begin_regeneration(
+            db,
+            user_id=user.id,
+            conversation_id=conversation_id,
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        ) from exc
+    except NothingToRegenerateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="There is no message to generate a reply for.",
+        ) from exc
+
+    return _stream_response(
+        engine=db.get_bind(),
+        conversation_id=conversation_id,
+        history=history,
+        ai_service=ai_service,
+        replace_message_id=replaces,
     )
 
 

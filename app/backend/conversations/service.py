@@ -3,6 +3,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.backend.conversations.formatting import (
+    LIKE_ESCAPE,
+    clean_title,
+    like_pattern,
+    make_snippet,
+    normalize_query,
+)
+from app.backend.messages.service import MESSAGE_ORDER
 from app.backend.models import Attachment, Conversation, Message
 
 # SQLite limits how many values one IN (...) may hold; stay well under it.
@@ -59,6 +67,115 @@ def get_conversation(
         raise ConversationNotFoundError
 
     return conversation
+
+
+def rename_conversation(
+    db: Session,
+    user_id: str,
+    conversation_id: str,
+    title: str,
+) -> Conversation:
+    """Give a conversation a new title. ``ValueError`` if the title is unusable."""
+    cleaned = clean_title(title)
+
+    conversation = get_conversation(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+    conversation.title = cleaned
+
+    db.commit()
+    db.refresh(conversation)
+
+    return conversation
+
+
+def list_conversation_messages(
+    db: Session,
+    conversation_id: str,
+) -> list[Message]:
+    """Messages oldest first. The caller must already have checked ownership."""
+    statement = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(*MESSAGE_ORDER)
+    )
+
+    return list(db.scalars(statement).all())
+
+
+SEARCH_RESULT_LIMIT = 30
+SEARCH_ROW_LIMIT = 2000  # safety cap on matching message rows scanned
+
+
+def search_conversations(
+    db: Session,
+    user_id: str,
+    query: str,
+    limit: int = SEARCH_RESULT_LIMIT,
+) -> list[dict]:
+    """Find this user's conversations by title or message text.
+
+    Returns one entry per conversation (most recently active first) with a
+    short ``snippet`` of the first matching message, or ``None`` when only
+    the title matched. The search is a case-insensitive substring match.
+    """
+    needle = normalize_query(query)
+
+    if not needle:
+        return []
+
+    found: dict[str, dict] = {}
+    pattern = like_pattern(needle)
+
+    title_matches = db.scalars(
+        select(Conversation)
+        .where(
+            Conversation.user_id == user_id,
+            Conversation.title.ilike(pattern, escape=LIKE_ESCAPE),
+        )
+        .order_by(Conversation.updated_at.desc())
+        .limit(limit)
+    )
+
+    for conversation in title_matches:
+        found[conversation.id] = {
+            "id": conversation.id,
+            "title": conversation.title,
+            "updated_at": conversation.updated_at,
+            "snippet": None,
+        }
+
+    message_matches = db.execute(
+        select(Conversation, Message)
+        .join(Message, Message.conversation_id == Conversation.id)
+        .where(
+            Conversation.user_id == user_id,
+            Message.content.ilike(pattern, escape=LIKE_ESCAPE),
+        )
+        .order_by(Conversation.updated_at.desc(), Message.created_at.desc())
+        .limit(SEARCH_ROW_LIMIT)
+    )
+
+    for conversation, message in message_matches:
+        entry = found.get(conversation.id)
+
+        if entry is None:
+            entry = found[conversation.id] = {
+                "id": conversation.id,
+                "title": conversation.title,
+                "updated_at": conversation.updated_at,
+                "snippet": None,
+            }
+
+        if entry["snippet"] is None:
+            entry["snippet"] = make_snippet(message.content, needle)
+
+    results = sorted(found.values(), key=lambda item: item["updated_at"], reverse=True)
+
+    return results[:limit]
 
 
 def _delete_conversations(db: Session, conversation_ids: list[str]) -> int:

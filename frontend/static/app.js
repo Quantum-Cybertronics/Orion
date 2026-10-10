@@ -18,10 +18,20 @@ const clearAge = document.getElementById("clear-age");
 const clearOlder = document.getElementById("clear-older");
 const clearAll = document.getElementById("clear-all");
 const clearStatus = document.getElementById("clear-status");
+const searchInput = document.getElementById("search-input");
+const chatHeader = document.getElementById("chat-header");
+const chatTitle = document.getElementById("chat-title");
+const renameButton = document.getElementById("rename-button");
+const exportButton = document.getElementById("export-button");
 
 let activeConversationId = null;
 let streamController = null; // set while a reply is streaming
 let CONFIRM_MS = 3000; // how long a "click again to confirm" button waits
+let SEARCH_DELAY_MS = 250; // typing pause before a search is sent
+let conversationTitles = {}; // id -> title, from the newest conversation list
+let renaming = false;        // the chat title is being edited
+let searchSeq = 0;           // lets a newer search discard an older answer
+let searchTimer = null;
 
 
 async function apiRequest(url, options = {}) {
@@ -98,12 +108,55 @@ function renderMessage(message) {
 }
 
 
-async function loadConversations() {
-    const conversations = await apiRequest("/conversations/");
+// Adds `text` to `parent`, wrapping every occurrence of `needle` in <mark>.
+// Built from text nodes, never innerHTML, so chat content cannot inject HTML.
+function appendHighlighted(parent, text, needle) {
+    const lower = text.toLowerCase();
+    const wanted = needle.toLowerCase();
 
+    let position = 0;
+
+    while (wanted) {
+        const hit = lower.indexOf(wanted, position);
+
+        if (hit === -1) {
+            break;
+        }
+
+        if (hit > position) {
+            parent.appendChild(document.createTextNode(text.slice(position, hit)));
+        }
+
+        const mark = document.createElement("mark");
+
+        mark.textContent = text.slice(hit, hit + wanted.length);
+        parent.appendChild(mark);
+
+        position = hit + wanted.length;
+    }
+
+    if (position < text.length) {
+        parent.appendChild(document.createTextNode(text.slice(position)));
+    }
+}
+
+
+// Draws the sidebar. `items` are {id, title, snippet?}; `query` is set when
+// they are search results, which also get a highlighted excerpt.
+function renderConversationList(items, query = "") {
     conversationList.innerHTML = "";
 
-    for (const conversation of conversations) {
+    if (query && items.length === 0) {
+        const empty = document.createElement("div");
+
+        empty.className = "list-empty";
+        empty.textContent = `No chats match \u201c${query}\u201d.`;
+        conversationList.appendChild(empty);
+
+        return;
+    }
+
+    for (const conversation of items) {
         const row = document.createElement("div");
 
         row.className = "conversation-row";
@@ -112,9 +165,24 @@ async function loadConversations() {
 
         button.type = "button";
         button.className = "conversation-item";
-        button.textContent = conversation.title;
         button.title = conversation.title;
         button.dataset.conversationId = conversation.id;
+
+        if (conversation.snippet) {
+            const title = document.createElement("span");
+            const snippet = document.createElement("span");
+
+            title.className = "conversation-title";
+            title.textContent = conversation.title;
+
+            snippet.className = "conversation-snippet";
+            appendHighlighted(snippet, conversation.snippet, query);
+
+            button.appendChild(title);
+            button.appendChild(snippet);
+        } else {
+            button.textContent = conversation.title;
+        }
 
         button.addEventListener("click", () => {
             loadConversation(conversation.id);
@@ -135,9 +203,182 @@ async function loadConversations() {
         row.appendChild(remove);
         conversationList.appendChild(row);
     }
+}
+
+
+async function loadConversations() {
+    const conversations = await apiRequest("/conversations/");
+
+    conversationTitles = {};
+
+    for (const conversation of conversations) {
+        conversationTitles[conversation.id] = conversation.title;
+    }
+
+    // While a search is active the sidebar keeps showing its results.
+    if (searchInput.value.trim()) {
+        await runSearch();
+    } else {
+        renderConversationList(conversations);
+    }
 
     return conversations;
 }
+
+
+async function runSearch() {
+    const query = searchInput.value.trim().replace(/\s+/g, " ");
+    const seq = ++searchSeq;
+
+    if (!query) {
+        await loadConversations();
+        return;
+    }
+
+    try {
+        const results = await apiRequest(
+            `/conversations/search?q=${encodeURIComponent(query)}`
+        );
+
+        // The user kept typing: a newer search owns the sidebar now.
+        if (seq !== searchSeq) {
+            return;
+        }
+
+        renderConversationList(results, query);
+        updateActiveConversation();
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+
+searchInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+
+    searchTimer = setTimeout(runSearch, SEARCH_DELAY_MS);
+});
+
+searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && searchInput.value) {
+        searchInput.value = "";
+        clearTimeout(searchTimer);
+        runSearch();
+    }
+});
+
+
+// ---- Chat title: rename and export -----------------------------------------
+
+function updateChatHeader() {
+    const title = activeConversationId
+        ? conversationTitles[activeConversationId]
+        : undefined;
+
+    chatHeader.hidden = title === undefined;
+
+    // Leave the text box alone while it is being edited.
+    if (title !== undefined && !renaming) {
+        chatTitle.textContent = title;
+    }
+}
+
+
+function startRename() {
+    if (!activeConversationId || renaming) {
+        return;
+    }
+
+    const conversationId = activeConversationId;
+    const original = conversationTitles[conversationId] || "";
+    const input = document.createElement("input");
+
+    input.type = "text";
+    input.className = "chat-title-input";
+    input.value = original;
+    input.maxLength = 100;
+    input.setAttribute("aria-label", "Conversation title");
+
+    renaming = true;
+    chatTitle.textContent = "";
+    chatTitle.appendChild(input);
+    input.focus();
+    input.select();
+
+    let finished = false;
+
+    async function finish(save) {
+        if (finished) {
+            return;
+        }
+
+        finished = true;
+
+        const title = input.value.trim().replace(/\s+/g, " ");
+
+        renaming = false;
+        updateChatHeader(); // puts the old title back
+
+        if (!save || !title || title === original) {
+            return;
+        }
+
+        try {
+            await apiRequest(`/conversations/${conversationId}`, {
+                method: "PATCH",
+                body: JSON.stringify({ title }),
+            });
+
+            await loadConversations();
+
+            updateActiveConversation();
+        } catch (error) {
+            console.error(error);
+
+            alert(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to rename the conversation."
+            );
+        }
+    }
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            finish(true);
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            finish(false);
+        }
+    });
+
+    input.addEventListener("blur", () => finish(true));
+}
+
+
+function exportConversation() {
+    if (!activeConversationId) {
+        return;
+    }
+
+    // A plain link with `download`: the server names the file, and the
+    // browser's own cookie carries the login, so no fetch is needed.
+    const link = document.createElement("a");
+
+    link.href = `/conversations/${encodeURIComponent(activeConversationId)}/export`;
+    link.download = "";
+    link.style.display = "none";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+
+renameButton.addEventListener("click", startRename);
+chatTitle.addEventListener("dblclick", startRename);
+exportButton.addEventListener("click", exportConversation);
 
 
 async function loadConversation(conversationId) {
@@ -157,6 +398,7 @@ async function loadConversation(conversationId) {
         showEmptyState();
     }
 
+    updateMessageActions();
     updateActiveConversation();
 
     loadFiles(conversationId).catch(console.error);
@@ -166,6 +408,8 @@ async function loadConversation(conversationId) {
 
 
 function updateActiveConversation() {
+    updateChatHeader();
+
     const items = document.querySelectorAll(".conversation-item");
 
     for (const item of items) {
@@ -350,7 +594,9 @@ async function* readEvents(response) {
 }
 
 
-async function streamReply(content) {
+// Streams a reply into the chat. With `regenerate`, `content` is ignored: the
+// last question is answered again and the new reply takes the old one's place.
+async function streamReply(content, { regenerate = false } = {}) {
     if (!activeConversationId) {
         await createConversation();
     }
@@ -364,7 +610,22 @@ async function streamReply(content) {
     }
 
     // Show the user's message immediately, then wait for the reply.
-    const userElement = renderMessage({ role: "user", content });
+    // When regenerating there is no new question, and the old answer stays on
+    // screen (hidden) until the new one has really arrived.
+    let userElement = null;
+    let replaced = null;
+
+    if (regenerate) {
+        const last = lastMessageElement();
+
+        if (last && last.classList.contains("assistant")) {
+            replaced = last;
+            replaced.style.display = "none";
+        }
+    } else {
+        userElement = renderMessage({ role: "user", content });
+    }
+
     const assistantElement = renderMessage({ role: "assistant", content: "" });
     const assistantContent = assistantElement.querySelector(".message-content");
     const assistantBody = assistantContent.querySelector(".markdown");
@@ -376,11 +637,13 @@ async function streamReply(content) {
 
     streamController = controller;
     setStreaming(true);
+    updateMessageActions(); // drops the old Regenerate button
 
     let received = "";
     let userSaved = false;
     let failed = false;
     let paintQueued = false;
+    let regenerateError = null; // why a regeneration produced nothing
 
     // Re-render at most once per frame; the whole reply is re-parsed so that
     // half-finished markdown (open code fence, unclosed **) displays sanely.
@@ -408,12 +671,12 @@ async function streamReply(content) {
 
     try {
         const response = await fetch(
-            `/conversations/${conversationId}/messages/stream`,
+            `/conversations/${conversationId}/messages/${regenerate ? "regenerate" : "stream"}`,
             {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content }),
+                body: JSON.stringify(regenerate ? {} : { content }),
                 signal: controller.signal,
             }
         );
@@ -440,6 +703,7 @@ async function streamReply(content) {
                 schedulePaint();
             } else if (event.type === "error") {
                 failed = true;
+                regenerateError = event.detail;
 
                 paint();
                 clearTyping(assistantBody, received.length > 0);
@@ -449,6 +713,8 @@ async function streamReply(content) {
         }
 
         if (!received && !failed) {
+            regenerateError = "No response was produced.";
+
             clearTyping(assistantBody, false);
             addNote(assistantContent, "No response was produced.", false);
         }
@@ -457,7 +723,13 @@ async function streamReply(content) {
             paint();
             clearTyping(assistantBody, received.length > 0);
             addNote(assistantContent, "Stopped.", false);
-        } else if (!userSaved) {
+        } else if (regenerate && !received) {
+            // Nothing arrived, so there is nothing to keep; the old answer
+            // is put back below.
+            regenerateError = error instanceof Error
+                ? error.message
+                : "Unable to regenerate the reply.";
+        } else if (!userSaved && !regenerate) {
             // The message never reached the server: undo and let them retry.
             userElement.remove();
             assistantElement.remove();
@@ -480,9 +752,101 @@ async function streamReply(content) {
             paint(); // final render, in case a frame was still pending
         }
 
+        if (regenerate) {
+            if (received.trim()) {
+                // The server replaced the old answer; do the same on screen.
+                if (replaced) {
+                    replaced.remove();
+                }
+            } else {
+                // The server kept the old answer, so bring it back.
+                assistantElement.remove();
+
+                if (replaced) {
+                    replaced.style.display = "";
+                }
+
+                if (regenerateError) {
+                    alert(regenerateError);
+                }
+            }
+        }
+
         streamController = null;
         setStreaming(false);
+        updateMessageActions();
         refreshAiStatus();
+    }
+}
+
+
+// ---- Regenerate ---------------------------------------------------------
+
+function lastMessageElement() {
+    const items = messagesElement.children;
+
+    for (let i = items.length - 1; i >= 0; i--) {
+        if (items[i].classList && items[i].classList.contains("message")) {
+            return items[i];
+        }
+    }
+
+    return null;
+}
+
+
+// Shows a Regenerate button under the last message, and nowhere else.
+function updateMessageActions() {
+    for (const item of Array.from(messagesElement.children)) {
+        const old = item.querySelector ? item.querySelector(".message-actions") : null;
+
+        if (old) {
+            old.remove();
+        }
+    }
+
+    if (streamController || !activeConversationId) {
+        return;
+    }
+
+    const last = lastMessageElement();
+
+    if (!last) {
+        return;
+    }
+
+    const row = document.createElement("div");
+    const button = document.createElement("button");
+
+    row.className = "message-actions";
+
+    button.type = "button";
+    button.className = "message-action regenerate";
+    button.textContent = "\u21BB Regenerate";
+    button.title = "Generate a new answer";
+
+    button.addEventListener("click", regenerateReply);
+
+    row.appendChild(button);
+    last.appendChild(row);
+}
+
+
+async function regenerateReply() {
+    if (streamController || !activeConversationId) {
+        return;
+    }
+
+    try {
+        await streamReply("", { regenerate: true });
+    } catch (error) {
+        console.error(error);
+
+        alert(
+            error instanceof Error
+                ? error.message
+                : "Unable to regenerate the reply."
+        );
     }
 }
 
@@ -567,6 +931,7 @@ function resetChatView() {
     clearMessages();
     showEmptyState();
     renderFiles([]);
+    updateChatHeader();
 }
 
 

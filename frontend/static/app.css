@@ -1045,3 +1045,165 @@ body.streaming .sidebar {
     font-size: 12px;
     color: var(--muted);
 }
+
+
+/* =========================
+   Chat tools: search, rename, export, regenerate
+   ========================= */
+
+.search-input {
+    flex: 0 0 auto;
+
+    width: 100%;
+    margin-top: 12px;
+    padding: 9px 12px;
+
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-light);
+    color: var(--text);
+
+    font-size: 13px;
+}
+
+.search-input::placeholder {
+    color: var(--muted);
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.conversation-item .conversation-title,
+.conversation-item .conversation-snippet {
+    display: block;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.conversation-item .conversation-snippet {
+    margin-top: 3px;
+
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.conversation-item mark {
+    padding: 0 1px;
+
+    border-radius: 3px;
+    background: rgba(110, 168, 254, 0.3);
+    color: inherit;
+}
+
+.list-empty {
+    padding: 10px 12px;
+
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.chat-header {
+    flex: 0 0 auto;
+
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    padding: 10px 18px;
+
+    border-bottom: 1px solid var(--border);
+}
+
+.chat-header[hidden] {
+    display: none;
+}
+
+.chat-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.chat-title-input {
+    width: 100%;
+    padding: 5px 9px;
+
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    background: var(--panel-light);
+    color: var(--text);
+
+    font: inherit;
+}
+
+.chat-title-input:focus {
+    outline: none;
+}
+
+.chat-action {
+    flex: 0 0 auto;
+
+    width: 32px;
+    height: 32px;
+
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.chat-action:hover {
+    background: var(--panel-light);
+    color: var(--text);
+}
+
+/* A row of actions under the last message needs the message to wrap. */
+.message {
+    flex-wrap: wrap;
+}
+
+.message-actions {
+    flex: 0 0 100%;
+
+    display: flex;
+    margin-top: 6px;
+}
+
+.message.user .message-actions {
+    justify-content: flex-end;
+}
+
+.message-action {
+    padding: 4px 10px;
+
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.message-action:hover {
+    background: var(--panel-light);
+    color: var(--text);
+}
+
+/* Nothing to regenerate while a reply is being written. */
+body.streaming .message-actions {
+    display: none;
+}

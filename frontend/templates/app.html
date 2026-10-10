@@ -49,6 +49,15 @@
                 + New conversation
             </button>
 
+            <input
+                id="search-input"
+                class="search-input"
+                type="search"
+                placeholder="Search chats..."
+                aria-label="Search chats"
+                autocomplete="off"
+            >
+
             <div id="conversation-list">
                 <!-- Conversations will appear here -->
             </div>
@@ -91,6 +100,28 @@
 
 
         <section id="chat" class="chat">
+
+            <div id="chat-header" class="chat-header" hidden>
+
+                <h2 id="chat-title" class="chat-title" title="Double-click to rename"></h2>
+
+                <button
+                    id="rename-button"
+                    class="chat-action"
+                    type="button"
+                    title="Rename chat"
+                    aria-label="Rename chat"
+                >&#9998;</button>
+
+                <button
+                    id="export-button"
+                    class="chat-action"
+                    type="button"
+                    title="Export as Markdown"
+                    aria-label="Export chat as Markdown"
+                >&#11015;</button>
+
+            </div>
 
             <div id="ai-banner" class="ai-banner" role="status" hidden></div>
 

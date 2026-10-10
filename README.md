@@ -84,6 +84,23 @@ context window (`ORION_LLAMA_CTX`) alongside your chat. ORION tells you if it
 doesn't. The first question after attaching a big file is slower because the
 model has to read the file; later questions reuse that work.
 
+## Working with your chats
+
+- **Regenerate**: the button under the newest answer asks the model again.
+  The old answer is replaced only once the new one has arrived, so a failed
+  attempt never loses it. If a question was left unanswered, the same button
+  retries it.
+- **Rename**: click the pencil next to the chat title (or double-click the
+  title). Enter or clicking away saves, Escape cancels. A renamed chat keeps
+  its name; it is never replaced by an automatic title.
+- **Search**: the box above the chat list matches chat titles and message text
+  (case-insensitive, no need for exact words). Results show an excerpt with the
+  match highlighted; clear the box to get the full list back. Text inside
+  attached files is not searched.
+- **Export**: the arrow next to the title downloads the chat as a `.md` file
+  (your messages and ORION's replies, plus the names of attached files, but
+  not their contents).
+
 ## Status
 
 Early development - ORION v0.1

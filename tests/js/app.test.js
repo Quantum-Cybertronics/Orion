@@ -338,5 +338,175 @@ const streamRoute = events => async url => url.endsWith("/stream") ? okResponse(
   check("switch refused: dropdown snaps back to the model that is really loaded", sel.value === "a.gguf" && sel.disabled === false);
   clearTimeout(run("statusTimer"));
 
+  // 13 chat tools: regenerate, search, rename, export --------------------
+  const actionRows = () => get("messages").children.map((m, i) => (m.querySelector(".message-actions") ? i : -1)).filter(i => i >= 0);
+  const msgsFor = list => async url => (url.endsWith("/messages/") ? jsonRes(list) : jsonRes([]));
+  const QA = [{ role: "user", content: "q" }, { role: "assistant", content: "old answer" }];
+  const regenBtn = i => msg(i).querySelector(".regenerate");
+  let regenUrl = null, regenBody = null, oldWhileStreaming = null, rowsWhileStreaming = null, oldEl = null, fetchCount = 0;
+  const regenRoute = respond => async (url, o = {}) => {
+    if (url.endsWith("/regenerate")) { regenUrl = url; regenBody = o.body; oldWhileStreaming = oldEl && oldEl.style.display; rowsWhileStreaming = actionRows().length; fetchCount++; return respond(); }
+    return jsonRes([]);
+  };
+
+  reset(msgsFor(QA)); await run("loadConversation('c1')");
+  check("regenerate: button sits under the last message only", JSON.stringify(actionRows()) === "[1]" && regenBtn(1).textContent === "\u21BB Regenerate", JSON.stringify(actionRows()));
+
+  oldEl = msg(1);
+  fetchImpl = regenRoute(() => okResponse(sse([{ type: "delta", content: "new **answer**" }, { type: "done" }])));
+  await regenBtn(1).listeners.click[0]();
+  check("regenerate: POSTs to /regenerate with no new question", regenUrl === "/conversations/c1/messages/regenerate" && regenBody === "{}", regenUrl + " " + regenBody);
+  check("regenerate: old answer hidden and buttons gone while streaming", oldWhileStreaming === "none" && rowsWhileStreaming === 0, oldWhileStreaming + " " + rowsWhileStreaming);
+  check("regenerate: new answer takes the old one's place", get("messages").children.length === 2 && msg(1) !== oldEl && body(1).innerHTML.includes("<strong>answer</strong>") && msg(0).className === "message user");
+  check("regenerate: button moves to the new answer, controls restored", JSON.stringify(actionRows()) === "[1]" && get("send-button").textContent === "Send" && !get("message-input").disabled);
+
+  // 409 / network failure: the old answer comes back and the reason is shown
+  reset(msgsFor(QA)); await run("loadConversation('c1')"); oldEl = msg(1);
+  fetchImpl = regenRoute(() => jsonRes({ detail: "There is no message to generate a reply for." }, 409));
+  await regenBtn(1).listeners.click[0]();
+  check("regenerate refused: old answer restored, reason shown", get("messages").children.length === 2 && msg(1) === oldEl && oldEl.style.display !== "none" && alerts[0] === "There is no message to generate a reply for." && JSON.stringify(actionRows()) === "[1]", JSON.stringify([alerts, actionRows()]));
+
+  // model error before any text: server keeps the old answer, so must the screen
+  reset(msgsFor(QA)); await run("loadConversation('c1')"); oldEl = msg(1);
+  fetchImpl = regenRoute(() => okResponse(sse([{ type: "error", detail: "the model is down" }])));
+  await regenBtn(1).listeners.click[0]();
+  check("regenerate fails with no text: old answer kept, error shown", get("messages").children.length === 2 && msg(1) === oldEl && oldEl.style.display !== "none" && alerts[0] === "the model is down", JSON.stringify(alerts));
+
+  // partial text then an error: the server saved the partial in place of the old answer
+  reset(msgsFor(QA)); await run("loadConversation('c1')"); oldEl = msg(1);
+  fetchImpl = regenRoute(() => okResponse(sse([{ type: "delta", content: "half an answer" }, { type: "error", detail: "model crashed" }])));
+  await regenBtn(1).listeners.click[0]();
+  check("regenerate fails midway: partial answer replaces the old one", get("messages").children.length === 2 && msg(1) !== oldEl && body(1).innerHTML.includes("half an answer") && content(1).children[1].textContent === "model crashed" && alerts.length === 0, JSON.stringify(alerts));
+
+  // Stop with nothing received: old answer restored, no alert
+  reset(msgsFor(QA)); await run("loadConversation('c1')"); oldEl = msg(1);
+  fetchImpl = async (url, o = {}) => url.endsWith("/regenerate")
+    ? okResponse(new ReadableStream({ start(c) { o.signal.addEventListener("abort", () => c.error(Object.assign(new Error("aborted"), { name: "AbortError" }))); } }))
+    : jsonRes([]);
+  const regenPending = regenBtn(1).listeners.click[0]();
+  await settle(30);
+  await get("message-form").listeners.submit[0]({ preventDefault() {} });
+  await regenPending;
+  check("regenerate stopped before any text: old answer back, no alert", get("messages").children.length === 2 && msg(1) === oldEl && oldEl.style.display !== "none" && alerts.length === 0, JSON.stringify(alerts));
+
+  // the reply to the last question was never saved: Regenerate retries it
+  reset(msgsFor([{ role: "user", content: "unanswered" }])); await run("loadConversation('c1')");
+  check("a chat ending with an unanswered question offers Regenerate", JSON.stringify(actionRows()) === "[0]", JSON.stringify(actionRows()));
+  oldEl = null; fetchImpl = regenRoute(() => okResponse(sse([{ type: "delta", content: "fresh" }, { type: "done" }])));
+  await regenBtn(0).listeners.click[0]();
+  check("retry: reply appears after the question, nothing removed", get("messages").children.length === 2 && msg(0).className === "message user" && content(0).textContent === "unanswered" && body(1).innerHTML.includes("fresh") && JSON.stringify(actionRows()) === "[1]", JSON.stringify(actionRows()));
+
+  // ordinary sends keep exactly one button, on the newest reply
+  reset(async url => (url.endsWith("/stream") ? okResponse(sse([{ type: "user_message" }, { type: "delta", content: "ok" }, { type: "done" }])) : history()));
+  await run("streamReply('one')"); await run("streamReply('two')");
+  check("after two sends only the newest reply has the button", get("messages").children.length === 4 && JSON.stringify(actionRows()) === "[3]", JSON.stringify(actionRows()));
+
+  // not while a reply is streaming
+  fetchCount = 0; fetchImpl = regenRoute(() => okResponse(sse([{ type: "done" }]))); run("streamController = {}");
+  await regenBtn(3).listeners.click[0](); run("streamController = null");
+  check("regenerate ignored while a reply is streaming", fetchCount === 0);
+
+  // ---- search ----------------------------------------------------------
+  run("SEARCH_DELAY_MS = 10");
+  const sInput = get("search-input");
+  const allConvs = [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }];
+  let searchCalls = [];
+  const searchApi = results => async url => {
+    searchCalls.push(url);
+    if (url.startsWith("/conversations/search")) return jsonRes(await results(url));
+    if (url === "/conversations/") return jsonRes(allConvs);
+    return jsonRes([]);
+  };
+  const snippetOf = i => selectBtn(i).children[1];
+
+  reset(searchApi(() => [{ id: "b", title: "Beta", snippet: "\u2026the Zebra crossing plan\u2026" }]));
+  sInput.value = "  zebra "; sInput.listeners.input[0](); await settle(60);
+  check("search: typing sends one trimmed query after a pause", searchCalls.filter(u => u.startsWith("/conversations/search")).join() === "/conversations/search?q=zebra", searchCalls.join());
+  check("search: result row shows title and excerpt, trash button kept", list().children.length === 1 && selectBtn(0).children[0].textContent === "Beta" && trashBtn(0).title === "Delete conversation");
+  const mark = snippetOf(0).children.find(c => c.tag === "mark");
+  check("search: the match is highlighted, keeping the original case", mark && mark.textContent === "Zebra", snippetOf(0).textContent);
+
+  reset(searchApi(() => [{ id: "x", title: "<b>t</b>", snippet: "<img src=x onerror=alert(1)> zebra" }]));
+  sInput.value = "zebra"; sInput.listeners.input[0](); await settle(60);
+  check("search: titles and excerpts are text, never HTML", selectBtn(0).children[0].innerHTML === "" && snippetOf(0).innerHTML === "" && snippetOf(0).textContent === "<img src=x onerror=alert(1)> zebra", snippetOf(0).textContent);
+
+  reset(searchApi(() => [])); sInput.value = "nope"; sInput.listeners.input[0](); await settle(60);
+  check("search: no matches -> friendly message", list().children.length === 1 && list().children[0].textContent === "No chats match \u201cnope\u201d.", list().children[0] && list().children[0].textContent);
+
+  reset(searchApi(async url => {
+    if (url.endsWith("q=ab")) { await settle(120); return [{ id: "a", title: "OLD", snippet: "x" }]; }
+    return [{ id: "b", title: "NEW", snippet: "y" }];
+  }));
+  sInput.value = "ab"; sInput.listeners.input[0](); await settle(40);
+  sInput.value = "abc"; sInput.listeners.input[0](); await settle(250);
+  check("search: a slow older answer never overwrites a newer one", list().children.length === 1 && selectBtn(0).children[0].textContent === "NEW", list().children[0] && selectBtn(0).children[0].textContent);
+
+  reset(searchApi(() => [])); sInput.value = ""; sInput.listeners.input[0](); await settle(60);
+  check("search: clearing the box brings back the full list", list().children.length === 2 && selectBtn(0).textContent === "Alpha" && selectBtn(1).textContent === "Beta");
+
+  reset(searchApi(() => [{ id: "b", title: "Beta", snippet: "zebra" }])); searchCalls = [];
+  sInput.value = "zebra"; await run("loadConversations()");
+  check("search: reloading the list (e.g. after a rename) keeps the results", list().children.length === 1 && searchCalls.includes("/conversations/") && searchCalls.some(u => u.startsWith("/conversations/search")));
+
+  reset(searchApi(() => [])); sInput.value = "zebra"; sInput.listeners.keydown[0]({ key: "Escape" }); await settle(60);
+  check("search: Escape clears the box and restores the list", sInput.value === "" && list().children.length === 2);
+  sInput.value = "";
+
+  // ---- rename ----------------------------------------------------------
+  const titleEl = get("chat-title");
+  let patched = null, serverTitle = "Old name", patchReply = null;
+  const renameApi = async (url, o = {}) => {
+    if (o.method === "PATCH") { patched = [url, o.body]; return patchReply(); }
+    if (url === "/conversations/") return jsonRes([{ id: "c1", title: serverTitle }]);
+    return jsonRes([]);
+  };
+  const editor = () => titleEl.children[0];
+  const press = (key) => editor().listeners.keydown[0]({ key, preventDefault() {} });
+  const startEdit = () => { get("rename-button").listeners.click[0](); return editor(); };
+
+  reset(renameApi); run("conversationTitles = { c1: 'Old name' }; renaming = false; updateChatHeader()");
+  check("header: shows the open chat's title", get("chat-header").hidden === false && titleEl.textContent === "Old name");
+  run("activeConversationId = null; updateChatHeader()");
+  check("header: hidden when no chat is open", get("chat-header").hidden === true);
+  run("activeConversationId = 'c1'; updateChatHeader()");
+
+  patchReply = () => { serverTitle = "Shiny new name"; return jsonRes({ id: "c1", title: "Shiny new name" }); };
+  let input = startEdit();
+  check("rename: pencil turns the title into a text box holding it", input && input.tag === "input" && input.value === "Old name" && input.maxLength === 100);
+  input.value = "  Shiny   new name "; await press("Enter"); await settle();
+  check("rename: Enter saves the cleaned title with PATCH", patched && patched[0] === "/conversations/c1" && JSON.parse(patched[1]).title === "Shiny new name", JSON.stringify(patched));
+  check("rename: header and sidebar show the new title", titleEl.textContent === "Shiny new name" && titleEl.children.length === 0 && list().children.length === 1 && selectBtn(0).textContent === "Shiny new name");
+
+  patched = null; input = startEdit(); input.value = "zzz"; await press("Escape"); await settle();
+  check("rename: Escape cancels without a request", patched === null && titleEl.textContent === "Shiny new name" && titleEl.children.length === 0);
+
+  patched = null; input = startEdit(); await press("Enter"); await settle();
+  check("rename: unchanged title sends nothing", patched === null && titleEl.textContent === "Shiny new name");
+
+  patched = null; input = startEdit(); input.value = "   "; await press("Enter"); await settle();
+  check("rename: blank title sends nothing and keeps the old one", patched === null && titleEl.textContent === "Shiny new name");
+
+  patchReply = () => jsonRes({ detail: "The title can be at most 100 characters." }, 422);
+  input = startEdit(); input.value = "a different name"; await press("Enter"); await settle();
+  check("rename refused: reason shown, old title back", alerts[0] === "The title can be at most 100 characters." && titleEl.textContent === "Shiny new name" && titleEl.children.length === 0, JSON.stringify(alerts));
+
+  patchReply = () => { serverTitle = "Via blur"; return jsonRes({ id: "c1", title: "Via blur" }); };
+  patched = null; input = startEdit(); input.value = "Via blur"; await input.listeners.blur[0](); await settle();
+  check("rename: clicking away saves too", patched && JSON.parse(patched[1]).title === "Via blur" && titleEl.textContent === "Via blur");
+
+  patched = null; titleEl.listeners.dblclick[0]();
+  check("rename: double-clicking the title starts editing", editor() && editor().tag === "input");
+  await press("Escape");
+
+  // ---- export ----------------------------------------------------------
+  const clicked = [];
+  El.prototype.click = function () { clicked.push([this.href, this.download, bodyEl.children.includes(this)]); };
+  reset(renameApi); const bodyBefore = bodyEl.children.length;
+  get("export-button").listeners.click[0]();
+  check("export: a download link to the chat's export URL is clicked", clicked.length === 1 && clicked[0][0] === "/conversations/c1/export" && clicked[0][1] === "" && clicked[0][2] === true, JSON.stringify(clicked));
+  check("export: the temporary link is removed again", bodyEl.children.length === bodyBefore);
+  run("activeConversationId = null"); get("export-button").listeners.click[0]();
+  check("export: nothing happens with no chat open", clicked.length === 1);
+
   console.log(failures ? failures + " FAILED" : "ALL PASSED"); process.exit(failures ? 1 : 0);
 })();

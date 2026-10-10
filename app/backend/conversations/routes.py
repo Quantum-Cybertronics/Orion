@@ -1,11 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.backend.attachments.context import load_attachments
 from app.backend.auth.dependencies import get_current_user
 from app.backend.database import get_db
 from app.backend.models import User
 from app.backend.storage import request_vacuum
+from app.backend.conversations.formatting import (
+    build_markdown,
+    content_disposition,
+)
 from app.backend.conversations.service import (
     ConversationNotFoundError,
     create_conversation,
@@ -13,7 +20,10 @@ from app.backend.conversations.service import (
     delete_conversation,
     delete_conversations_older_than,
     get_conversation,
+    list_conversation_messages,
     list_conversations,
+    rename_conversation,
+    search_conversations,
 )
 
 
@@ -22,6 +32,10 @@ router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
 class CreateConversationRequest(BaseModel):
     title: str | None = None
+
+
+class RenameConversationRequest(BaseModel):
+    title: str
 
 
 @router.post("/")
@@ -50,6 +64,19 @@ def list_all(
     )
 
 
+@router.get("/search")
+def search(
+    q: str = Query(min_length=1, max_length=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Find conversations whose title or messages contain ``q``.
+
+    Declared before ``/{conversation_id}`` so "search" is never read as an id.
+    """
+    return search_conversations(db, user_id=user.id, query=q)
+
+
 @router.get("/{conversation_id}")
 def get_one(
     conversation_id: str,
@@ -67,6 +94,68 @@ def get_one(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found.",
         ) from exc
+
+
+@router.patch("/{conversation_id}")
+def rename(
+    conversation_id: str,
+    payload: RenameConversationRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return rename_conversation(
+            db,
+            user_id=user.id,
+            conversation_id=conversation_id,
+            title=payload.title,
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/{conversation_id}/export")
+def export(
+    conversation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Download the conversation as a Markdown file."""
+    try:
+        conversation = get_conversation(
+            db,
+            user_id=user.id,
+            conversation_id=conversation_id,
+        )
+    except ConversationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found.",
+        ) from exc
+
+    markdown = build_markdown(
+        conversation.title,
+        list_conversation_messages(db, conversation.id),
+        [item.filename for item in load_attachments(db, conversation.id)],
+        datetime.now().astimezone(),
+    )
+
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": content_disposition(conversation.title),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.delete("/{conversation_id}")
