@@ -14,6 +14,12 @@ def ai_status(user: User = Depends(get_current_user)):
     return get_runtime().status()
 
 
+@router.post("/recheck")
+def recheck(user: User = Depends(get_current_user)):
+    """Look for the engine and models again; starts loading if both are there."""
+    return get_runtime().recheck()
+
+
 class SelectModelRequest(BaseModel):
     model: str
 

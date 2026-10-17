@@ -28,6 +28,7 @@ from app.backend.ai.model_catalog import (
     choose_initial_model,
     describe_model,
     list_models,
+    models_dir,
     save_selection,
 )
 from app.backend.ai.providers import EchoAIProvider, UnavailableAIProvider
@@ -108,6 +109,21 @@ def _make_llama(
     )
 
     return manager, provider
+
+
+def _unavailable_reason(binary: Path | None, model: Path | None) -> str | None:
+    """Why local AI cannot start, or ``None`` if it can."""
+    missing = []
+
+    if binary is None:
+        missing.append(
+            f"no llama-server found (expected under runtime/llama/{platform_tag()}/)"
+        )
+
+    if model is None:
+        missing.append("no .gguf model found (expected in models/)")
+
+    return "Local AI unavailable: " + "; ".join(missing) + "." if missing else None
 
 
 class AIRuntime:
@@ -232,6 +248,65 @@ class AIRuntime:
 
         return self.status()
 
+    def recheck(self) -> dict:
+        """Look for the engine and a model again, e.g. after the user added them.
+
+        If both are now present the AI starts loading, with no restart needed.
+        Does nothing once the local AI is running, or in echo mode.
+        """
+        if self.settings.provider == "echo" or self.kind == "llama":
+            return self.status()
+
+        with self._switch_lock:
+            binary = find_server_binary(self.base_dir, self.settings.server_path)
+
+            if binary is not None:
+                self.binary = binary
+
+            if self.settings.model_path:
+                model = find_model(self.base_dir, self.settings.model_path)
+                pinned = model is not None
+            else:
+                model = choose_initial_model(self.base_dir, self.data_dir)
+                pinned = False
+
+            reason = _unavailable_reason(self.binary, model)
+
+            if reason is None:
+                self.model_locked = pinned
+                self.model = model
+                self.note = None
+                self._attach_llama(model)
+                logger.info("Local AI found after recheck; loading %s", model.name)
+            elif self.kind == "unavailable":
+                self.note = reason
+            else:
+                self.note = f"Echo mode. {reason}"
+
+        return self.status()
+
+    def setup_info(self) -> dict | None:
+        """What the user still has to provide, or ``None`` if nothing.
+
+        Only set while the local AI is not running because files are missing
+        (not for deliberate echo mode), so the UI can show a setup guide.
+        """
+        if self.kind == "llama" or self.settings.provider == "echo":
+            return None
+
+        engine_missing = self.binary is None
+        model_missing = self.model is None and not list_models(self.base_dir)
+
+        if not (engine_missing or model_missing):
+            return None
+
+        return {
+            "engine_missing": engine_missing,
+            "model_missing": model_missing,
+            "engine_dir": str(self.base_dir / "runtime" / "llama" / platform_tag()),
+            "models_dir": str(models_dir(self.base_dir)),
+        }
+
     def _attach_llama(self, model: Path) -> None:
         """Bring up llama-server for a runtime that started without a model."""
         manager, provider = _make_llama(
@@ -271,6 +346,7 @@ class AIRuntime:
 
         info["models"] = [m.to_dict() for m in self.available_models()]
         info["can_switch"] = self.can_switch
+        info["setup"] = self.setup_info()
 
         return info
 
@@ -297,19 +373,9 @@ def build_runtime(
         model = choose_initial_model(base_dir, data_dir)
         pinned = False
 
-    missing = []
+    reason = _unavailable_reason(binary, model)
 
-    if binary is None:
-        missing.append(
-            f"no llama-server found (expected under runtime/llama/{platform_tag()}/)"
-        )
-
-    if model is None:
-        missing.append("no .gguf model found (expected in models/)")
-
-    if missing:
-        reason = "Local AI unavailable: " + "; ".join(missing) + "."
-
+    if reason:
         if settings.provider == "llama":
             logger.error(reason)
             return AIRuntime(

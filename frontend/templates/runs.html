@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>ORION - Agent runs</title>
+
+    <link rel="stylesheet" href="/static/runs.css">
+</head>
+
+<body>
+
+<div class="runs-page">
+
+    <header class="runs-topbar">
+        <a class="back-link" href="/app">&larr; Back to chat</a>
+
+        <h1>Agent runs</h1>
+
+        <span class="runs-user">{{ username }}</span>
+    </header>
+
+    <div class="runs-layout">
+
+        <aside class="runs-sidebar">
+
+            <h2>Start a run</h2>
+
+            <div id="task-list" class="task-list"></div>
+
+            <h2>History</h2>
+
+            <div id="run-list" class="run-list"></div>
+
+        </aside>
+
+        <main id="runs-main" class="runs-main">
+
+            <div id="runs-empty" class="runs-empty">
+                Start a run to watch its steps appear here, one by one.
+            </div>
+
+            <div id="run-header" class="run-header" hidden>
+
+                <h2 id="run-title"></h2>
+
+                <span id="run-status" class="status-pill"></span>
+
+                <button id="undo-button" class="run-action" type="button" hidden>Undo changes</button>
+
+                <button id="cancel-button" class="run-action" type="button" hidden>Cancel run</button>
+
+                <button id="delete-button" class="run-action" type="button" hidden>Delete</button>
+
+            </div>
+
+            <div id="approval-bar" class="approval-bar" hidden>
+
+                <span>Review the proposed changes below. Nothing has been written yet.</span>
+
+                <button id="apply-button" class="approval-apply" type="button">Apply changes</button>
+
+                <button id="reject-button" class="approval-reject" type="button">Reject</button>
+
+            </div>
+
+            <div id="run-changes" class="run-changes" hidden></div>
+
+            <div id="run-params" class="run-params" hidden></div>
+
+            <div id="run-summary" class="run-summary" hidden></div>
+
+            <ol id="timeline" class="timeline"></ol>
+
+        </main>
+
+    </div>
+
+</div>
+
+<script src="/static/markdown.js"></script>
+<script src="/static/runs.js"></script>
+
+</body>
+</html>

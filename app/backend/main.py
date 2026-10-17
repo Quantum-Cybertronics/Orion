@@ -3,6 +3,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from app.backend.agents.manager import get_run_manager
+from app.backend.agents.routes import router as runs_router
+from app.backend.agents.service import fail_interrupted_runs
 from app.backend.ai.routes import router as ai_router
 from app.backend.ai.runtime import get_runtime
 from app.backend.attachments.routes import router as attachments_router
@@ -23,12 +26,16 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 async def lifespan(_: FastAPI):
     run_migrations()
 
+    # Runs a previous ORION process never finished can no longer complete.
+    fail_interrupted_runs(engine)
+
     runtime = get_runtime()
     runtime.start()  # loads the model in the background; does not block
 
     try:
         yield
     finally:
+        get_run_manager().cancel_all()
         runtime.stop()
         compact_on_shutdown(engine)
 
@@ -52,6 +59,7 @@ app.include_router(auth_router)
 app.include_router(ai_router)
 app.include_router(attachments_router)
 app.include_router(conversations_router)
+app.include_router(runs_router)
 app.include_router(messages_router)
 app.include_router(frontend_router)
 

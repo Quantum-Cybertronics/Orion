@@ -15,9 +15,32 @@ ORION is a local-first AI assistant designed to run from portable storage on Win
 - Portable Windows and Linux runtime
 - Minimal external dependencies
 
+## Starting ORION
+
+- **Windows:** double-click `Start-ORION.bat`.
+- **Linux / macOS:** run `./start-orion.sh`.
+- **By hand:** `python launch.py` (from the project's virtual environment).
+
+The launcher picks a free port (8000, or the next free one), starts ORION, and
+opens your browser at the login page once it is ready. Starting it a second
+time just reopens the copy that is already running. Options:
+`--port 8000`, `--host 127.0.0.1`, `--no-browser`. Keep its window open while
+you use ORION; press Ctrl+C in it (or close it) to stop.
+
+If the `.venv` folder is missing, the scripts offer to create it and install
+`requirements.txt` for you (internet needed, once).
+
+### First run
+
+With no AI engine or model yet, ORION still opens and shows a setup guide at
+the top of the chat: it names the exact folders to put the llama.cpp files
+and your `.gguf` model in. Add them, press **Check again**, and ORION starts
+loading the model, with no restart.
+
 ## Project Structure
 
 ```text
+launch.py   Launcher (Start-ORION.bat / start-orion.sh call this)
 app/        Application source
 config/     Configuration
 docs/       Documentation
@@ -66,6 +89,7 @@ first run the first file alphabetically is used.
 | `ORION_MAX_REPLY_TOKENS` | `1024` | longest single reply |
 | `ORION_LLAMA_THREADS` | auto | CPU threads |
 | `ORION_LLAMA_STARTUP_TIMEOUT` | `180` | seconds to wait for the model to load |
+| `ORION_AGENT_ROOTS` | unset (any folder) | folders the reader may look at (`;` or `:` separated) |
 
 Streaming endpoint: `POST /conversations/{id}/messages/stream` returns
 server-sent events (`user_message`, `delta`, `done`, `error`). The server log
@@ -100,6 +124,86 @@ model has to read the file; later questions reuse that work.
 - **Export**: the arrow next to the title downloads the chat as a `.md` file
   (your messages and ORION's replies, plus the names of attached files, but
   not their contents).
+
+## Agent runs
+
+**Agent runs** (link in the chat's top bar, or `/runs`) is the foundation for
+running multi-step tasks: each run is a fixed list of steps run by a
+*supervisor* that is ordinary code, not a model. Every step, note, timing and
+outcome is written to an event log and shown as a live timeline.
+
+- **Self-check** checks the AI engine and models, asks the model a short test
+  question, and reports how long it took.
+- **Ask about a folder** is the *reader*: give it a folder (full path, e.g.
+  `D:\Projects\myapp`) and a question. It lists folders, reads files and
+  searches them, then answers in Markdown, naming the files it used. Every
+  tool call appears in the timeline with the reason the model gave, and under
+  the answer ORION itself lists which files and line ranges were really read
+  (so you can see what the answer is based on, whatever the model claims). It needs a
+  real model loaded (not echo mode) and works best with a context size of
+  4096 or more.
+- One run at a time per user (there is one AI model). **Cancel** stops a run
+  between steps, and in the middle of a model reply.
+- Every run has limits (number of steps, total time); a failing step stops the
+  run, and the log says exactly where and why.
+- Runs and their logs are kept until you delete them. If ORION is closed
+  while a run is going, that run is marked as failed on the next start.
+
+The reader asks the model for one small JSON action per turn and sends the
+AI server a grammar so the reply is always valid. If a particular llama.cpp
+build refuses the grammar (this happened with Gemma on a recent build), ORION
+retries without it and reads the JSON leniently; the timeline shows a warning
+when that happens, and it works but is a little less reliable.
+
+- **Edit files in a folder** is the *editor*: give it a folder and a change you
+  want ("rename the function helper to compute in util.py"). It reads the
+  files, prepares small exact search-and-replace edits (and new files), and then
+  **stops and shows you a coloured diff**. Nothing is written until you click
+  **Apply changes**; **Reject** or **Cancel** leaves every file exactly as it
+  was.
+
+### How editing stays safe
+
+- Edits are kept in memory. The only code that writes your files runs after
+  your approval, and it is all-or-nothing: if any file changed since the diff
+  was made, nothing is written; the originals are backed up first; files are
+  written atomically; and if a write fails part way, everything is put back.
+- After applying, **Undo changes** restores the backups. It only touches a
+  file that still contains exactly what ORION wrote, so work you did after the
+  change is never overwritten (those files are reported and left alone).
+  Backups live in `data/run_changes/` and are removed when you delete the run.
+- Each edit must match the file's text exactly, and exactly once, or it is
+  refused with a hint; at most 5 files and 12 edits per task.
+- The same gate as the reader applies (nothing outside the folder, ORION's own
+  data, secrets files, `.git`/`node_modules`...), plus: binary, non-UTF-8,
+  oversized and mixed-line-ending files are never edited, Windows (CRLF) line
+  endings and byte-order marks are preserved, and a whole drive cannot be
+  chosen as the folder.
+- While waiting for you, a run does not time out (the wait is not counted), but
+  it gives up after 30 minutes without a decision, changing nothing.
+
+### How the reader stays safe
+
+The model never touches your files directly. Each turn it can only ask for one
+of three read-only actions, and every request goes through one strict gate:
+
+- Only paths inside the folder you chose; `..`, absolute paths, drive
+  letters and Windows device names are refused, and symlinks that lead
+  outside the folder are not followed.
+- ORION's own `data` folder (your accounts and chats) is always off limits,
+  even if you pick a folder that contains it.
+- Secrets-looking files (`.env`, private keys, `*.pem`...) are never shown,
+  and `.git`, `node_modules` and similar folders are skipped.
+- Caps on file size, output size, and search effort; binary files are skipped.
+- Text inside files is treated as data, never as instructions, and the number
+  of steps and the total time are limited.
+
+To restrict which folders may be read at all, set `ORION_AGENT_ROOTS` to one
+or more folders (separated by `;` on Windows, `:` elsewhere); anything outside
+them is refused. Unset means any folder your account can read.
+
+Later tasks plug into the same supervisor with steps that propose edits and
+check them.
 
 ## Status
 

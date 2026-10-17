@@ -508,5 +508,56 @@ const streamRoute = events => async url => url.endsWith("/stream") ? okResponse(
   run("activeConversationId = null"); get("export-button").listeners.click[0]();
   check("export: nothing happens with no chat open", clicked.length === 1);
 
+  // 14 first-run setup guide --------------------------------------------
+  const panel = get("setup-panel");
+  const guide = { engine_missing: true, model_missing: true, engine_dir: "D:\\Orion\\runtime\\llama\\windows-x64", models_dir: "D:\\Orion\\models" };
+  const needs = (extra = {}) => ({ provider: "echo", state: "ready", detail: "Echo mode. Local AI unavailable.", model: null, models: [], can_switch: false, setup: guide, ...extra });
+  const steps = () => panel.children.find(c => c.tag === "ol").children.map(li => li.textContent);
+  const checkBtn = () => panel.children.find(c => c.tag === "button");
+  const showStatus = s => run(`renderBanner(${JSON.stringify(s)})`);
+
+  run('setupKey = ""'); showStatus(needs());
+  check("setup: guide shown, generic banner hidden", panel.hidden === false && get("ai-banner").hidden === true);
+  check("setup: lists both missing items with their exact folders", steps().length === 2 && steps()[0].includes("D:\\Orion\\runtime\\llama\\windows-x64") && steps()[1].includes("D:\\Orion\\models"), JSON.stringify(steps()));
+  check("setup: has a Check again button", checkBtn() && checkBtn().textContent === "Check again" && checkBtn().disabled === false);
+
+  run('setupKey = ""'); showStatus(needs({ setup: { ...guide, engine_missing: false } }));
+  check("setup: only the missing item is listed", steps().length === 1 && steps()[0].includes("D:\\Orion\\models") && !steps()[0].includes("runtime"), JSON.stringify(steps()));
+
+  const kids = panel.children; showStatus(needs({ setup: { ...guide, engine_missing: false } }));
+  check("setup: an unchanged status does not rebuild the guide", panel.children === kids);
+
+  showStatus({ provider: "echo", state: "ready", detail: "Echo mode (no AI model).", models: [], can_switch: false, setup: null });
+  check("setup: no setup info -> guide hidden, normal banner back", panel.hidden === true && get("ai-banner").hidden === false && /Echo mode/.test(get("ai-banner").textContent));
+
+  // Check again: the files are now there, so the AI starts loading
+  let recheckMethod = null, recheckReply = null;
+  const loadingStatus = { provider: "llama", state: "loading", detail: null, model: "chat.gguf", can_switch: true, setup: null, models: [{ id: "chat.gguf", name: "chat", size: 2 * 1024 ** 3 }] };
+  let serverStatus = loadingStatus;  // what /ai/status reports (kept consistent with the recheck reply)
+  const recheckApi = async (url, o = {}) => (url === "/ai/recheck" ? ((recheckMethod = o.method), recheckReply()) : jsonRes(serverStatus));
+
+  reset(recheckApi); recheckReply = () => jsonRes(loadingStatus);
+  run('setupKey = ""; modelListKey = ""'); showStatus(needs());
+  await checkBtn().listeners.click[0](); await settle();
+  check("recheck: POSTs to /ai/recheck", recheckMethod === "POST");
+  check("recheck: guide disappears and the loading banner appears", panel.hidden === true && get("ai-banner").hidden === false && /Loading the AI model chat\.gguf/.test(get("ai-banner").textContent), get("ai-banner").textContent);
+  check("recheck: the model dropdown fills in", get("model-select").children.length === 1 && get("model-select").value === "chat.gguf" && get("model-select").disabled === false);
+  clearTimeout(run("statusTimer"));
+
+  // still missing: say so, keep the guide, no scary alert
+  reset(recheckApi); recheckReply = () => jsonRes(needs()); serverStatus = needs();
+  run('setupKey = ""'); showStatus(needs());
+  const btn = checkBtn(); await btn.listeners.click[0](); await settle();
+  check("recheck: still missing -> a friendly note, guide stays", panel.hidden === false && /Still not found/.test(run("setupResult.textContent")) && alerts.length === 0, run("setupResult.textContent"));
+  check("recheck: the button is usable again", btn.disabled === false && btn.textContent === "Check again");
+  clearTimeout(run("statusTimer"));
+
+  // server error: reported, button usable again
+  reset(recheckApi); recheckReply = () => jsonRes({ detail: "Boom." }, 500); serverStatus = needs();
+  run('setupKey = ""'); showStatus(needs());
+  const btn2 = checkBtn(); await btn2.listeners.click[0](); await settle();
+  check("recheck failed: error shown, button usable again", alerts[0] === "Boom." && btn2.disabled === false && btn2.textContent === "Check again", JSON.stringify(alerts));
+  clearTimeout(run("statusTimer"));
+
   console.log(failures ? failures + " FAILED" : "ALL PASSED"); process.exit(failures ? 1 : 0);
 })();

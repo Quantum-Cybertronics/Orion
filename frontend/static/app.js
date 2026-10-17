@@ -7,6 +7,7 @@ const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const sendButton = document.getElementById("send-button");
 const aiBanner = document.getElementById("ai-banner");
+const setupPanel = document.getElementById("setup-panel");
 const modelSelect = document.getElementById("model-select");
 const chatElement = document.getElementById("chat");
 const attachButton = document.getElementById("attach-button");
@@ -1221,10 +1222,129 @@ chatElement.addEventListener("drop", async (event) => {
 
 let statusTimer = null;
 let lastStatus = null;   // newest /ai/status, used to restore the dropdown
+let setupKey = "";       // what the setup guide currently shows
+let setupResult = null;  // the guide's "still not found" line
 let modelListKey = "";   // what the dropdown currently shows
 
 
+// The first-run guide: shown instead of the banner while the AI engine or a
+// model is missing, with the exact folders to put them in.
+function renderSetup(status) {
+    const setup = status.setup || null;
+
+    setupPanel.hidden = !setup;
+
+    const key = JSON.stringify(setup);
+
+    // Only rebuild on a real change, so polling never disturbs the button.
+    if (!setup || key === setupKey) {
+        if (!setup) {
+            setupKey = "";
+        }
+
+        return;
+    }
+
+    setupKey = key;
+    setupPanel.innerHTML = "";
+
+    const add = (tag, className, text) => {
+        const element = document.createElement(tag);
+
+        if (className) {
+            element.className = className;
+        }
+
+        if (text) {
+            element.textContent = text;
+        }
+
+        setupPanel.appendChild(element);
+
+        return element;
+    };
+
+    add("h3", "", "Finish setting up ORION");
+    add(
+        "p",
+        "",
+        "ORION needs an AI engine and a model to answer you. " +
+            "Until then it only repeats what you type."
+    );
+
+    const steps = add("ol", "");
+
+    const addStep = (text, path) => {
+        const item = document.createElement("li");
+        const code = document.createElement("code");
+
+        item.appendChild(document.createTextNode(text));
+        code.textContent = path;
+        item.appendChild(code);
+        steps.appendChild(item);
+    };
+
+    if (setup.engine_missing) {
+        addStep(
+            "Put the llama.cpp program files (llama-server and the files next to it) in:",
+            setup.engine_dir
+        );
+    }
+
+    if (setup.model_missing) {
+        addStep("Put one or more .gguf model files in:", setup.models_dir);
+    }
+
+    const button = add("button", "setup-check", "Check again");
+
+    button.type = "button";
+    button.addEventListener("click", () => recheckSetup(button));
+
+    add("p", "", "No restart needed: ORION starts as soon as it finds both.");
+    setupResult = add("p", "setup-result", "");
+}
+
+
+async function recheckSetup(button) {
+    button.disabled = true;
+    button.textContent = "Checking...";
+
+    try {
+        const status = await apiRequest("/ai/recheck", { method: "POST" });
+
+        lastStatus = status;
+        renderBanner(status);
+        renderModels(status);
+
+        if (status.setup && setupResult) {
+            setupResult.textContent =
+                "Still not found. Check the folder above, then try again.";
+        }
+
+        refreshAiStatus(); // polls quickly while a found model loads
+    } catch (error) {
+        console.error(error);
+
+        alert(
+            error instanceof Error
+                ? error.message
+                : "Unable to check for the AI engine."
+        );
+    } finally {
+        button.disabled = false;
+        button.textContent = "Check again";
+    }
+}
+
+
 function renderBanner(status) {
+    renderSetup(status);
+
+    if (status.setup) {
+        aiBanner.hidden = true;
+        return;
+    }
+
     let text = "";
     let kind = "";
 

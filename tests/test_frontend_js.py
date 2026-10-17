@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("script", ["markdown.test.js", "app.test.js"])
+@pytest.mark.parametrize("script", ["markdown.test.js", "app.test.js", "runs.test.js"])
 def test_frontend_script(script):
     result = subprocess.run(
         ["node", str(JS_DIR / script)],

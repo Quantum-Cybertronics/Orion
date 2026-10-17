@@ -1207,3 +1207,102 @@ body.streaming .sidebar {
 body.streaming .message-actions {
     display: none;
 }
+
+
+/* =========================
+   First-run setup guide
+   ========================= */
+
+.setup-panel {
+    flex: 0 0 auto;
+
+    margin: 14px 18px 0;
+    padding: 16px 18px;
+
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    background: var(--panel-light);
+}
+
+.setup-panel[hidden] {
+    display: none;
+}
+
+.setup-panel h3 {
+    margin: 0 0 6px;
+
+    font-size: 16px;
+}
+
+.setup-panel p {
+    margin: 6px 0;
+
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.setup-panel ol {
+    margin: 10px 0 12px;
+    padding-left: 20px;
+
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.setup-panel li {
+    margin-bottom: 6px;
+}
+
+.setup-panel code {
+    display: block;
+    margin-top: 3px;
+    padding: 6px 9px;
+
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--panel);
+
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.setup-check {
+    padding: 8px 14px;
+
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.setup-check:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+
+.topbar-link {
+    padding: 7px 12px;
+
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.topbar-link:hover {
+    background: var(--panel-light);
+}
+
+@media (max-width: 520px) {
+    .topbar-link {
+        padding: 6px 8px;
+    }
+}

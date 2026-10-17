@@ -1,0 +1,8 @@
+import sys; sys.path.insert(0,"/tmp")
+from edit import edit
+p="tests/test_runs_api.py"
+
+edit(p, '''    assert list(body) == ["self_check", "ask_folder"]''', '''    assert list(body) == ["self_check", "ask_folder", "edit_files"]
+    assert [(f["name"], f["kind"]) for f in body["edit_files"]["fields"]] == [
+        ("folder", "text"),
+        ("instruction", "textarea"),

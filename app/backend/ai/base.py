@@ -26,6 +26,20 @@ class AIProvider(ABC):
         """
         yield self.generate(messages)
 
+    def generate_structured(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict,
+        *,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Generate one reply that is guaranteed to be JSON matching ``schema``.
+
+        Returns the raw JSON text. Providers that can constrain their output
+        should override this; the default says it is not supported.
+        """
+        raise AIProviderError("This AI provider cannot produce structured output.")
+
     @abstractmethod
     def generate_title(
         self,

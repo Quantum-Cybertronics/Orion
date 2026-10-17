@@ -22,6 +22,18 @@ class EchoAIProvider(AIProvider):
         # Word-sized pieces; joining them reproduces generate() exactly.
         yield from re.findall(r"\S+\s*|\s+", self.generate(messages))
 
+    def generate_structured(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict,
+        *,
+        max_tokens: int | None = None,
+    ) -> str:
+        raise AIProviderError(
+            "ORION is in echo mode (no AI model is loaded), so it cannot do this. "
+            "Load a model first."
+        )
+
     def generate_title(self, content: str) -> str:
         title = " ".join(content.split())
 
@@ -46,6 +58,15 @@ class UnavailableAIProvider(AIProvider):
     def stream(self, messages: list[dict[str, str]]) -> Iterator[str]:
         raise AIProviderError(self.reason)
         yield  # pragma: no cover - makes this a generator
+
+    def generate_structured(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict,
+        *,
+        max_tokens: int | None = None,
+    ) -> str:
+        raise AIProviderError(self.reason)
 
     def generate_title(self, content: str) -> str:
         return EchoAIProvider().generate_title(content)

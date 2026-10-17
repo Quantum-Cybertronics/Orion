@@ -25,6 +25,18 @@ class AIService:
 
         return self.provider.stream(messages)
 
+    def generate_structured(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict,
+        *,
+        max_tokens: int | None = None,
+    ) -> str:
+        if not messages:
+            raise ValueError("Messages cannot be empty.")
+
+        return self.provider.generate_structured(messages, schema, max_tokens=max_tokens)
+
     def generate_title(
         self,
         content: str,

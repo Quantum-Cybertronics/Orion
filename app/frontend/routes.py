@@ -33,6 +33,20 @@ async def signup_page(request: Request):
     )
 
 
+@router.get("/runs")
+def runs_page(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="runs.html",
+        context={
+            "username": user.username,
+        },
+    )
+
+
 @router.get("/app")
 def app_page(
     request: Request,

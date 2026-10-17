@@ -393,3 +393,141 @@ def test_api_key_is_random_and_kept_off_the_command_line(manager):
     real = LlamaServerManager(Path("llama-server"), Path("model.gguf"))
 
     assert real.api_key not in " ".join(real.build_command(1234))
+
+
+# ------------------------------------------------------ structured replies
+
+SCHEMA = {
+    "type": "object",
+    "properties": {"why": {"type": "string", "maxLength": 50}, "action": {"type": "string"}},
+    "required": ["why", "action"],
+}
+
+
+def ask(provider, text, **kwargs):
+    return provider.generate_structured([{"role": "user", "content": text}], SCHEMA, **kwargs)
+
+
+def answer_of(provider, text, **kwargs):
+    return json.loads(ask(provider, text, **kwargs))["answer"]
+
+
+def test_structured_reply_sends_a_grammar_not_a_response_format(provider):
+    answer = answer_of(provider, "hello", max_tokens=300)
+
+    # what the (fake) server saw: a non-streaming request carrying our own grammar
+    assert "grammar=True" in answer and "has_root=True" in answer
+    assert "response_format=False" in answer      # that path breaks Gemma on some builds
+    assert "stream=False" in answer
+    assert "max_tokens=300" in answer
+    assert provider.structured_fallback is False
+
+
+def test_structured_reply_defaults_to_the_providers_token_limit(provider):
+    assert "max_tokens=256" in answer_of(provider, "hello")
+
+
+def test_structured_reply_is_returned_verbatim(provider):
+    assert ask(provider, '__json__:{"why": "x", "action": "list_files"}') == '{"why": "x", "action": "list_files"}'
+
+
+def test_a_cut_off_structured_reply_is_an_error_not_broken_json(provider):
+    with pytest.raises(AIProviderError) as error:
+        ask(provider, "__length__")
+
+    assert "cut off" in str(error.value)
+
+
+def test_other_http_errors_are_reported_not_hidden_by_the_fallback(provider):
+    for text, expected in (("__error__", "context size"), ("__always_400__", "something else went wrong")):
+        with pytest.raises(AIProviderError) as error:
+            ask(provider, text)
+
+        assert expected in str(error.value)
+
+    assert provider.structured_fallback is False
+    assert provider._grammar_rejected is None          # a different 400 is not a grammar problem
+
+
+def test_a_server_that_rejects_the_grammar_gets_an_unconstrained_retry(provider):
+    """The real failure: 'Failed to initialize samplers: Unexpected empty grammar stack'."""
+    reply = ask(provider, "__grammar_error__")
+
+    parsed = json.loads(reply)                            # the JSON was pulled out of the chatty reply
+    assert parsed["action"] == "answer"
+    assert "grammar=False" in parsed["answer"]
+    assert provider.structured_fallback is True
+    assert provider._grammar_rejected is not None
+
+
+def test_after_a_rejected_grammar_it_is_not_tried_again_for_that_model(provider):
+    ask(provider, "__grammar_error__")
+
+    assert "grammar=False" in answer_of(provider, "hello again")
+    assert provider.structured_fallback is True
+
+
+def test_switching_models_tries_the_grammar_again(provider):
+    ask(provider, "__grammar_error__")
+    provider.manager.model = Path("another-model.gguf")
+
+    assert "grammar=True" in answer_of(provider, "hello")
+    assert provider.structured_fallback is False
+
+
+def test_the_fallback_still_reports_cut_off_replies(provider):
+    ask(provider, "__grammar_error__")
+
+    with pytest.raises(AIProviderError) as error:
+        ask(provider, "__length__")
+
+    assert "cut off" in str(error.value)
+
+
+def test_a_schema_that_cannot_become_a_grammar_is_sent_unconstrained(provider):
+    odd = {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]}
+
+    reply = provider.generate_structured([{"role": "user", "content": "hi"}], odd)
+
+    assert "grammar=False" in json.loads(reply)["answer"]
+    assert provider.structured_fallback is True
+    assert provider._grammar_rejected is None          # not the server's fault
+
+
+def test_structured_calls_release_the_generation_lock(provider):
+    ask(provider, "hello")
+    ask(provider, "__grammar_error__")
+
+    assert provider.busy is False
+
+
+def test_the_reply_reserve_follows_the_requested_token_limit(manager):
+    small = LlamaServerProvider(manager(), ctx_size=1000, max_tokens=100)
+    history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": "word " * 100}
+        for i in range(6)
+    ]
+
+    kept_default = small._prepare(history)
+    kept_big_reply = small._prepare(history, reply_tokens=450)
+
+    assert len(kept_big_reply) < len(kept_default)
+
+
+def test_other_providers_explain_why_they_cannot_do_it():
+    from app.backend.ai.providers import EchoAIProvider, UnavailableAIProvider
+    from app.backend.ai.service import AIService
+
+    messages = [{"role": "user", "content": "hi"}]
+
+    with pytest.raises(AIProviderError) as echo:
+        AIService(EchoAIProvider()).generate_structured(messages, SCHEMA)
+
+    with pytest.raises(AIProviderError) as down:
+        AIService(UnavailableAIProvider("no engine")).generate_structured(messages, SCHEMA)
+
+    assert "echo mode" in str(echo.value)
+    assert str(down.value) == "no engine"
+
+    with pytest.raises(ValueError):
+        AIService(EchoAIProvider()).generate_structured([], SCHEMA)

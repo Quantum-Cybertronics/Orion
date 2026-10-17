@@ -41,6 +41,52 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
         self.wfile.flush()
 
+    def _structured(self, request, last):
+        """Non-streaming JSON reply, like a llama-server given a grammar (or not).
+
+        ``__json__:<text>``    returns <text> verbatim (any reply, even broken JSON)
+        ``__length__``         simulates a reply that was cut off
+        ``__grammar_error__``  rejects a request that carries a grammar, with the
+                               exact error some real llama.cpp builds give
+        ``__always_400__``     rejects every structured request
+        With a grammar the default reply is bare JSON; without one it is JSON
+        wrapped in chatty prose and a code fence, like an unconstrained model.
+        """
+        grammar = request.get("grammar")
+
+        if last == "__always_400__":
+            return self._json(400, {"error": {"message": "something else went wrong"}})
+
+        if last == "__grammar_error__" and grammar:
+            return self._json(
+                400,
+                {
+                    "error": {
+                        "message": "Failed to initialize samplers: Unexpected empty "
+                        "grammar stack after accepting piece: model (2028)"
+                    }
+                },
+            )
+
+        if last.startswith("__json__:"):
+            content = last[len("__json__:"):]
+        else:
+            answer = (
+                f"grammar={bool(grammar)} stream={request.get('stream')} "
+                f"max_tokens={request.get('max_tokens')} "
+                f"has_root={'root ::=' in (grammar or '')} "
+                f"response_format={'response_format' in request}"
+            )
+            payload = json.dumps({"why": "fake", "action": "answer", "answer": answer})
+            content = payload if grammar else f"Sure! Here is my reply:\n```json\n{payload}\n```\nHope that helps."
+
+        finish = "length" if last == "__length__" else "stop"
+
+        self._json(
+            200,
+            {"choices": [{"message": {"role": "assistant", "content": content}, "finish_reason": finish}]},
+        )
+
     def do_GET(self):
         if self.path != "/health":
             return self._json(404, {"error": {"message": "not found"}})
@@ -67,6 +113,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(
                 400, {"error": {"message": "prompt exceeds the context size"}}
             )
+
+        # Non-streaming requests are ORION's structured (JSON) ones.
+        if request.get("stream") is False:
+            return self._structured(request, last)
 
         reply = f"echo[{len(messages)}]: {last}"
 
