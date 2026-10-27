@@ -27,6 +27,7 @@ from app.backend.agents.service import (
     list_runs,
     run_to_dict,
 )
+from app.backend.agents.supervisor import AcknowledgementRequired
 from app.backend.agents.tasks import ParamError, backup_dir_of, get_task, list_tasks
 from app.backend.auth.dependencies import get_current_user
 from app.backend.config import DATA_DIR
@@ -46,6 +47,8 @@ class CreateRunRequest(BaseModel):
 
 class DecisionRequest(BaseModel):
     decision: Literal["apply", "reject"]
+    # Must be true to apply a change the security checks rated high-risk.
+    acknowledge_risks: bool = False
 
 
 def present(run) -> dict:
@@ -214,7 +217,20 @@ def decide(
     except RunNotFoundError as exc:
         raise _not_found() from exc
 
-    if run.status != "awaiting_approval" or not get_run_manager().decide(run.id, payload.decision):
+    try:
+        accepted = run.status == "awaiting_approval" and get_run_manager().decide(
+            run.id, payload.decision, payload.acknowledge_risks
+        )
+    except AcknowledgementRequired as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The security checks found high-risk problems with this change. "
+                "Review them, then confirm that you want to apply it anyway."
+            ),
+        ) from exc
+
+    if not accepted:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This run is not waiting for a decision.",

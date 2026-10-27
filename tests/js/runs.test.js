@@ -360,6 +360,96 @@ const pollsAfter = () => S.calls.filter(c => c.includes("/events?after=")).map(c
   await get("delete-button").listeners.click[0]();
   check("deleting after an undo needs no such warning", confirms[0] === "Delete this run and its log?", confirms[0]);
 
+  // 15 security findings and "apply anyway" -------------------------------------
+  const F_HIGH = { severity: "high", code: "aws_key", path: "src/app.py", line: 6, message: "Looks like an AWS access key.", excerpt: 'key = "AKIA****"' };
+  const F_WARN = { severity: "warning", code: "script_file", path: "deploy.ps1", line: null, message: "New script file: it can run commands.", excerpt: null };
+  const F_INFO = { severity: "info", code: "build_file", path: "requirements.txt", line: null, message: "New build or dependency file.", excerpt: null };
+  const checkEv = (seq, findings, extra = {}) => ev(seq, "check", "Security checks: " + (findings.length ? findings.length + " findings" : "nothing unusual found"), { role: "security", detail: JSON.stringify({ findings }), ...extra });
+  const waitingWith = async (id, findings, more = []) => {
+    const r = mkRun(id, "awaiting_approval");
+    await boot([r], { [id]: [ev(1, "run_started", "Edit"), ...(findings === null ? [] : [checkEv(2, findings)]), ev(3, "proposal", "Proposed changes", { detail: DIFF }), ...more] });
+    run("clearTimeout(pollTimer)");
+    return r;
+  };
+  const rowsOfCheck = () => rows().find(r => r.className === "event event-check").children[1].children.find(c => c.className === "findings").children;
+
+  await waitingWith("f1", [F_HIGH, F_WARN, F_INFO]);
+  const checkRow = rows().find(r => r.className === "event event-check");
+  check("a security check is drawn as a list of findings with an icon and a security chip", checkRow.children[0].textContent === "\u2691" && checkRow.children[1].children[0].children[0].textContent === "security" && rowsOfCheck().length === 3);
+  check("each finding shows its severity, message, location and (masked) excerpt", rowsOfCheck()[0].className === "finding finding-high" && rowsOfCheck()[0].children[0].textContent === "High risk" && rowsOfCheck()[0].children[1].textContent === "Looks like an AWS access key." && rowsOfCheck()[0].children[2].textContent === "src/app.py:6" && rowsOfCheck()[0].children[3].textContent === 'key = "AKIA****"');
+  check("a finding with no line shows just the path, and none has an empty excerpt", rowsOfCheck()[1].children[2].textContent === "deploy.ps1" && rowsOfCheck()[1].children.length === 3 && rowsOfCheck()[1].children[0].textContent === "Warning" && rowsOfCheck()[2].children[0].textContent === "Note");
+
+  await waitingWith("f2", []);
+  check("no findings says so plainly", rowsOfCheck().length === 1 && rowsOfCheck()[0].className === "finding-none" && rowsOfCheck()[0].textContent === "Nothing unusual found.");
+
+  await waitingWith("f3", [{ ...F_WARN, message: "<img src=x onerror=alert(1)>", path: "<b>x</b>", excerpt: "<script>bad()</script>" }]);
+  const hostileRow = rowsOfCheck()[0];
+  check("finding text can never inject HTML", hostileRow.children[1]._text === "<img src=x onerror=alert(1)>" && hostileRow.children[1].innerHTML === "" && hostileRow.children[2]._text === "<b>x</b>" && hostileRow.children[3]._text === "<script>bad()</script>");
+
+  await boot([mkRun("f4", "completed")], { f4: [ev(1, "check", "Security checks", { detail: "not json at all" })] });
+  check("an unreadable check detail falls back to plain text", rows()[0].children[1].children[1].className === "event-detail" && rows()[0].children[1].children[1]._text === "not json at all");
+
+  // the approval bar follows the findings
+  const barText = () => get("approval-text").textContent;
+  await waitingWith("b0", null);
+  check("before any check the bar just asks for review", barText() === "Review the proposed changes below. Nothing has been written yet." && get("apply-button").textContent === "Apply changes" && get("apply-button").className === "approval-apply");
+  await waitingWith("b1", []);
+  check("a clean check is mentioned", /security checks found nothing unusual/.test(barText()) && get("apply-button").textContent === "Apply changes");
+  await waitingWith("b2", [F_INFO]);
+  check("notes alone count as nothing unusual", /found nothing unusual/.test(barText()));
+  await waitingWith("b3", [F_WARN, { ...F_WARN, path: "x.sh" }]);
+  check("warnings are counted, and do not change the button", /flagged 2 warnings\./.test(barText()) && get("apply-button").textContent === "Apply changes" && get("apply-button").className === "approval-apply");
+  await waitingWith("b4", [F_HIGH, F_WARN]);
+  check("a high-risk finding changes the message and the button", /flagged 1 high-risk finding and 1 warning\./.test(barText()) && get("apply-button").textContent === "Apply anyway" && get("apply-button").className === "approval-apply approval-risky", barText());
+  await waitingWith("b5", [F_HIGH, { ...F_HIGH, line: 9 }]);
+  check("plural wording for several high-risk findings", /flagged 2 high-risk findings\./.test(barText()));
+
+  // findings from another run do not leak into this one
+  await waitingWith("b6", [F_HIGH]);
+  await run("selectRun('b6')"); run("clearTimeout(pollTimer)");
+  const nocheck = mkRun("b7", "awaiting_approval"); S.runs.push(nocheck); S.events.b7 = [ev(1, "proposal", "p", { detail: DIFF })];
+  await run("selectRun('b7')"); run("clearTimeout(pollTimer)");
+  check("switching to a run without a check resets the bar", /^Review the proposed changes/.test(barText()) && get("apply-button").textContent === "Apply changes");
+
+  // Applying
+  const decisions = [];
+  const record = r => b => { decisions.push(b); r.status = "running"; return json(r); };
+
+  const plain = await waitingWith("a1", [F_WARN]);
+  S.decisionReply = record(plain); confirms.length = 0;
+  await get("apply-button").listeners.click[0](); run("clearTimeout(pollTimer)");
+  check("applying a change without high-risk findings asks nothing extra", confirms.length === 0 && JSON.stringify(decisions[0]) === '{"decision":"apply"}', JSON.stringify([confirms, decisions]));
+
+  const risky = await waitingWith("a2", [F_HIGH, { ...F_HIGH, path: "b.py", line: 2, message: "Second." }, { ...F_HIGH, path: "c.py", line: 3, message: "Third." }, { ...F_HIGH, path: "d.py", line: 4, message: "Fourth." }]);
+  S.decisionReply = record(risky); confirms.length = 0; decisions.length = 0; confirmAnswer = false;
+  await get("apply-button").listeners.click[0]();
+  check("Apply anyway asks for confirmation naming the problems, and declining sends nothing", confirms.length === 1 && /HIGH RISK/.test(confirms[0]) && confirms[0].includes("src/app.py:6: Looks like an AWS access key.") && confirms[0].includes("(and 1 more)") && !confirms[0].includes("Fourth.") && decisions.length === 0 && get("apply-button").disabled === false, confirms[0]);
+
+  confirmAnswer = true;
+  await get("apply-button").listeners.click[0](); run("clearTimeout(pollTimer)");
+  check("confirming sends the acknowledgement along with the decision", JSON.stringify(decisions[0]) === '{"decision":"apply","acknowledge_risks":true}', JSON.stringify(decisions));
+
+  const rej = await waitingWith("a3", [F_HIGH]);
+  S.decisionReply = record(rej); confirms.length = 0; decisions.length = 0;
+  await get("reject-button").listeners.click[0](); run("clearTimeout(pollTimer)");
+  check("rejecting a high-risk change needs no confirmation", confirms.length === 0 && JSON.stringify(decisions[0]) === '{"decision":"reject"}');
+
+  await waitingWith("a4", [F_HIGH]);
+  S.decisionReply = () => json({ detail: "The security checks found high-risk problems with this change. Review them, then confirm that you want to apply it anyway." }, 409);
+  alerts.length = 0; confirmAnswer = true;
+  await get("apply-button").listeners.click[0](); run("clearTimeout(pollTimer)");
+  check("if the server still refuses, its reason is shown and the buttons are usable again", /high-risk problems/.test(alerts[0]) && get("apply-button").disabled === false && get("reject-button").disabled === false, JSON.stringify(alerts));
+
+  // the latest check wins
+  const rerun = mkRun("l1", "awaiting_approval");
+  await boot([rerun], { l1: [checkEv(1, [F_HIGH]), checkEv(2, [])] }); run("clearTimeout(pollTimer)");
+  check("if a later check replaces an earlier one, the bar follows the latest", /found nothing unusual/.test(barText()) && get("apply-button").textContent === "Apply changes");
+
+  // the masking note ORION adds to a diff is styled apart from real diff lines
+  await boot([mkRun("n9", "awaiting_approval")], { n9: [ev(1, "proposal", "p", { detail: "# Secret-looking values are hidden in this view (shown as ****). The real text will be written.\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+key = \"AKIA****\"\n #hash comment as context" })] }); run("clearTimeout(pollTimer)");
+  const noted = rows()[0].children[1].children[1].children;
+  check("the masking note is styled as a note, and real lines starting with # stay ordinary", noted[0].className === "diff-note" && noted[1].className === "diff-file" && noted[5].className === "diff-add" && noted[6].className === "", noted.map(l => l.className).join("|"));
+
   console.log(failures ? failures + " FAILED" : "ALL PASSED");
   process.exit(failures ? 1 : 0);
 })();

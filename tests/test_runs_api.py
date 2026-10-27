@@ -794,3 +794,94 @@ def test_events_can_be_appended_after_a_run_has_finished(test_engine):
     assert [e.seq for e in events] == [1, 2, 3]
     assert events[-1].title == "Undo: restored 1" and events[-1].elapsed_ms == 9000      # never goes backwards
 
+
+# ============================================ security checks and risk acknowledgement
+
+AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+
+
+def risky_edit(monkeypatch):
+    use_scripted_model(
+        monkeypatch,
+        {"why": "change", "action": "replace", "path": "src/app.py", "find": "    return 1",
+         "replace": f'    return 1\n    key = "{AWS_KEY}"'},
+        {"why": "done", "action": "finish", "summary": "added a line"},
+    )
+
+
+def test_the_security_check_is_logged_before_the_diff_and_never_holds_a_secret(tmp_path, monkeypatch):
+    root = edit_folder(tmp_path)
+    risky_edit(monkeypatch)
+    client = new_client()
+    run = start_edit(client, root)
+    wait_for_status(client, run["id"], "awaiting_approval")
+
+    events = client.get(f"/runs/{run['id']}/events").json()["events"]
+    kinds = [e["type"] for e in events if e["type"] in ("check", "proposal")]
+    event = [e for e in events if e["type"] == "check"][0]
+    finding = json.loads(event["detail"])["findings"][0]
+
+    assert kinds == ["check", "proposal"] and event["role"] == "security"
+    assert event["title"] == "Security checks: 1 high-risk finding"
+    assert finding["code"] == "aws_key" and finding["severity"] == "high" and "AKIA****" in finding["excerpt"]
+    assert AWS_KEY not in json.dumps(events)                  # the secret is nowhere in the stored log
+
+    client.post(f"/runs/{run['id']}/cancel")
+    wait_until_finished(client, run["id"])
+
+
+def test_a_high_risk_change_is_refused_until_it_is_acknowledged(tmp_path, monkeypatch):
+    root = edit_folder(tmp_path)
+    risky_edit(monkeypatch)
+    client = new_client()
+    run = start_edit(client, root)
+    wait_for_status(client, run["id"], "awaiting_approval")
+    path = f"/runs/{run['id']}/decision"
+
+    refused = client.post(path, json={"decision": "apply"})
+    explicitly_not = client.post(path, json={"decision": "apply", "acknowledge_risks": False})
+
+    assert refused.status_code == 409 and "high-risk" in refused.json()["detail"]
+    assert explicitly_not.status_code == 409
+    assert client.get(f"/runs/{run['id']}").json()["status"] == "awaiting_approval"      # still waiting
+    assert app_text(root) == APP_TEXT
+
+    accepted = client.post(path, json={"decision": "apply", "acknowledge_risks": True})
+    assert accepted.status_code == 200
+
+    final = wait_until_finished(client, run["id"])
+
+    assert final["status"] == "completed" and AWS_KEY in app_text(root)
+    assert "Security checks: 1 high-risk finding." in final["summary"]
+    assert "You confirmed the high-risk findings before applying." in final["summary"]
+
+
+def test_rejecting_a_high_risk_change_needs_no_acknowledgement(tmp_path, monkeypatch):
+    root = edit_folder(tmp_path)
+    risky_edit(monkeypatch)
+    client = new_client()
+    run = start_edit(client, root)
+    wait_for_status(client, run["id"], "awaiting_approval")
+
+    assert client.post(f"/runs/{run['id']}/decision", json={"decision": "reject"}).status_code == 200
+
+    assert wait_until_finished(client, run["id"])["status"] == "completed"
+    assert app_text(root) == APP_TEXT
+
+
+def test_changes_without_high_risk_findings_never_need_an_acknowledgement(tmp_path, monkeypatch):
+    root = edit_folder(tmp_path)
+    use_scripted_model(
+        monkeypatch,
+        {"why": "new script", "action": "create", "path": "deploy.ps1", "content": "Write-Host hello\n"},
+        {"why": "done", "action": "finish", "summary": "added a script"},
+    )
+    client = new_client()
+    run = start_edit(client, root)
+    wait_for_status(client, run["id"], "awaiting_approval")
+    events = client.get(f"/runs/{run['id']}/events").json()["events"]
+
+    assert [e["title"] for e in events if e["type"] == "check"] == ["Security checks: 1 warning"]
+    assert client.post(f"/runs/{run['id']}/decision", json={"decision": "apply"}).status_code == 200
+    assert wait_until_finished(client, run["id"])["status"] == "completed" and (root / "deploy.ps1").exists()
+

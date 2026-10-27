@@ -705,3 +705,99 @@ body {
     color: var(--text);
     font-weight: 600;
 }
+
+
+/* ---- Security check findings ---- */
+
+.event-check .event-icon {
+    color: var(--accent);
+}
+
+.findings {
+    margin-top: 8px;
+}
+
+.finding-none {
+    color: var(--good);
+    font-size: 13px;
+}
+
+.finding {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+
+    margin-bottom: 8px;
+    padding: 8px 10px;
+
+    border-left: 3px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.finding-high {
+    border-left-color: var(--bad);
+}
+
+.finding-warning {
+    border-left-color: var(--warn);
+}
+
+.finding-info {
+    border-left-color: var(--accent);
+}
+
+.finding-badge {
+    flex: 0 0 auto;
+
+    padding: 1px 8px;
+
+    border-radius: 999px;
+    background: var(--border);
+
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.finding-high .finding-badge {
+    background: rgba(248, 113, 113, 0.2);
+    color: var(--bad);
+}
+
+.finding-warning .finding-badge {
+    background: rgba(251, 191, 36, 0.2);
+    color: var(--warn);
+}
+
+.finding-message {
+    flex: 1 1 240px;
+}
+
+.finding-where {
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+}
+
+.finding-excerpt {
+    flex: 1 0 100%;
+
+    color: var(--muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.approval-apply.approval-risky {
+    background: var(--bad);
+    color: #fff;
+}
+
+.diff-note {
+    color: var(--warn);
+    font-style: italic;
+}

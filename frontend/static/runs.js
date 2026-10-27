@@ -7,6 +7,7 @@ const runTitle = document.getElementById("run-title");
 const runStatus = document.getElementById("run-status");
 const undoButton = document.getElementById("undo-button");
 const approvalBar = document.getElementById("approval-bar");
+const approvalText = document.getElementById("approval-text");
 const applyButton = document.getElementById("apply-button");
 const rejectButton = document.getElementById("reject-button");
 const runChanges = document.getElementById("run-changes");
@@ -22,6 +23,7 @@ let runs = [];              // newest first
 let selectedRunId = null;
 let lastSeq = 0;            // newest event already on screen
 let pollTimer = null;
+let latestFindings = null;  // the security checks of the selected run (null: none yet)
 let taskCards = [];         // [{kind, button, inputs}] for each kind of run
 let fieldLabels = {};       // field name -> label, for showing a run's parameters
 
@@ -42,6 +44,7 @@ const EVENT_ICONS = {
     step_skipped: "\u26A0",   // ⚠
     tool_call: "\u2699",     // ⚙
     proposal: "\u00B1",      // ±
+    check: "\u2691",         // ⚑
     info: "\u2022",           // •
     warning: "\u26A0",        // ⚠
     run_finished: "\u25A0",   // ■
@@ -315,6 +318,80 @@ async function startRun(kind) {
 
 // ---- The selected run -----------------------------------------------------
 
+const SEVERITY_LABELS = { high: "High risk", warning: "Warning", info: "Note" };
+
+
+// The findings inside a `check` event's detail, or null if it is not that JSON.
+function parseFindings(detail) {
+    try {
+        const data = JSON.parse(detail);
+
+        return Array.isArray(data.findings) ? data.findings : null;
+    } catch {
+        return null;
+    }
+}
+
+
+function renderFindings(findings) {
+    const list = document.createElement("div");
+
+    list.className = "findings";
+
+    if (findings.length === 0) {
+        const none = document.createElement("div");
+
+        none.className = "finding-none";
+        none.textContent = "Nothing unusual found.";
+        list.appendChild(none);
+
+        return list;
+    }
+
+    for (const finding of findings) {
+        const row = document.createElement("div");
+        const badge = document.createElement("span");
+        const message = document.createElement("span");
+
+        row.className = `finding finding-${finding.severity}`;
+
+        badge.className = "finding-badge";
+        badge.textContent = SEVERITY_LABELS[finding.severity] || finding.severity;
+
+        message.className = "finding-message";
+        message.textContent = finding.message;
+
+        row.appendChild(badge);
+        row.appendChild(message);
+
+        if (finding.path) {
+            const where = document.createElement("span");
+
+            where.className = "finding-where";
+            where.textContent = finding.line ? `${finding.path}:${finding.line}` : finding.path;
+            row.appendChild(where);
+        }
+
+        if (finding.excerpt) {
+            const code = document.createElement("code");
+
+            code.className = "finding-excerpt";
+            code.textContent = finding.excerpt;
+            row.appendChild(code);
+        }
+
+        list.appendChild(row);
+    }
+
+    return list;
+}
+
+
+function countFindings(severity) {
+    return (latestFindings || []).filter((finding) => finding.severity === severity).length;
+}
+
+
 // A unified diff, one coloured line per line. Built from text, never HTML.
 function renderDiff(text) {
     const block = document.createElement("pre");
@@ -329,6 +406,8 @@ function renderDiff(text) {
             row.className = "diff-file";
         } else if (line.startsWith("@@")) {
             row.className = "diff-hunk";
+        } else if (line.startsWith("#")) {
+            row.className = "diff-note";   // ORION's own note: real diff lines start with + - or a space
         } else if (line.startsWith("+")) {
             row.className = "diff-add";
         } else if (line.startsWith("-")) {
@@ -369,7 +448,11 @@ function renderEvent(event) {
         title.appendChild(role);
     }
 
-    if (event.detail && event.type === "proposal") {
+    const findings = event.type === "check" && event.detail ? parseFindings(event.detail) : null;
+
+    if (findings) {
+        body.appendChild(renderFindings(findings));
+    } else if (event.detail && event.type === "proposal") {
         body.appendChild(renderDiff(event.detail));
     } else if (event.detail) {
         const detail = document.createElement("div");
@@ -430,6 +513,38 @@ function renderParams(run) {
 }
 
 
+// What the approval bar says, given the security checks (if they have run).
+function renderApprovalBar() {
+    const high = countFindings("high");
+    const warnings = countFindings("warning");
+    const base = "Nothing has been written yet.";
+
+    if (latestFindings === null) {
+        approvalText.textContent = `Review the proposed changes below. ${base}`;
+    } else if (high + warnings === 0) {
+        approvalText.textContent =
+            `The security checks found nothing unusual. Review the proposed changes below. ${base}`;
+    } else {
+        const parts = [];
+
+        if (high) {
+            parts.push(`${high} high-risk finding${high === 1 ? "" : "s"}`);
+        }
+
+        if (warnings) {
+            parts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
+        }
+
+        approvalText.textContent =
+            `The security checks flagged ${parts.join(" and ")}. Read them in the timeline, then review the changes. ${base}`;
+    }
+
+    // High-risk findings change what the button means: it must be a deliberate choice.
+    applyButton.textContent = high > 0 ? "Apply anyway" : "Apply changes";
+    applyButton.className = "approval-apply" + (high > 0 ? " approval-risky" : "");
+}
+
+
 function renderRunHeader(run) {
     runsEmpty.hidden = true;
     runHeader.hidden = false;
@@ -451,6 +566,8 @@ function renderRunHeader(run) {
     if (!waiting) {
         applyButton.disabled = false;
         rejectButton.disabled = false;
+    } else {
+        renderApprovalBar();
     }
 
     undoButton.hidden = run.active || !changes || !changes.applied || changes.undone;
@@ -490,6 +607,7 @@ function renderRunHeader(run) {
 function showNoRunSelected() {
     selectedRunId = null;
     lastSeq = 0;
+    latestFindings = null;
 
     runParams.hidden = true;
     runParams.dataset.runId = "";
@@ -510,6 +628,7 @@ function selectRun(runId) {
 
     selectedRunId = runId;
     lastSeq = 0;
+    latestFindings = null;
 
     timeline.innerHTML = "";
     runSummary.hidden = true;
@@ -571,6 +690,10 @@ async function pollEvents() {
         if (event.seq > lastSeq) {
             timeline.appendChild(renderEvent(event));
             lastSeq = event.seq;
+
+            if (event.type === "check") {
+                latestFindings = parseFindings(event.detail);
+            }
         }
     }
 
@@ -618,7 +741,31 @@ async function cancelRun() {
 }
 
 
-async function decide(decision) {
+// "Apply" is a deliberate extra step when the checks rated the change high-risk.
+async function applyChanges() {
+    const high = (latestFindings || []).filter((finding) => finding.severity === "high");
+
+    if (high.length === 0) {
+        return decide("apply");
+    }
+
+    const shown = high.slice(0, 3).map((finding) =>
+        `\u2022 ${finding.path}${finding.line ? ":" + finding.line : ""}: ${finding.message}`
+    ).join("\n");
+
+    const more = high.length > 3 ? `\n(and ${high.length - 3} more)` : "";
+
+    if (!confirm(
+        `The security checks rated this change HIGH RISK:\n\n${shown}${more}\n\nApply it anyway?`
+    )) {
+        return undefined;
+    }
+
+    return decide("apply", true);
+}
+
+
+async function decide(decision, acknowledgeRisks = false) {
     const runId = selectedRunId;
 
     if (!runId) {
@@ -629,9 +776,15 @@ async function decide(decision) {
     rejectButton.disabled = true;
 
     try {
+        const body = { decision };
+
+        if (acknowledgeRisks) {
+            body.acknowledge_risks = true;
+        }
+
         await apiRequest(`/runs/${runId}/decision`, {
             method: "POST",
-            body: JSON.stringify({ decision }),
+            body: JSON.stringify(body),
         });
     } catch (error) {
         console.error(error);
@@ -778,7 +931,7 @@ runSummary.addEventListener("click", async (event) => {
 });
 
 
-applyButton.addEventListener("click", () => decide("apply"));
+applyButton.addEventListener("click", () => applyChanges());
 rejectButton.addEventListener("click", () => decide("reject"));
 undoButton.addEventListener("click", undoChanges);
 cancelButton.addEventListener("click", cancelRun);

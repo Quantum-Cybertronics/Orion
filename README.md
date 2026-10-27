@@ -182,6 +182,32 @@ when that happens, and it works but is a little less reliable.
 - While waiting for you, a run does not time out (the wait is not counted), but
   it gives up after 30 minutes without a decision, changing nothing.
 
+### Security checks before you approve
+
+Before the diff reaches you, ORION runs a set of checks in plain code (no AI is
+involved, so they cannot be talked out of anything) on exactly what is about to
+be written, and shows the findings in the timeline and on the approval bar:
+
+- **High risk** (you must confirm before you can apply; the server enforces
+  this, not just the page): keys and tokens (AWS, GitHub, Slack, Google, Stripe,
+  JSON web tokens, private keys), passwords in URLs or assigned in code, hidden
+  direction-control characters, commands that download and run code, encoded
+  PowerShell, and SSH or sudo configuration files.
+- **Warning**: new or changed scripts (`.bat`, `.ps1`, `.sh`...), CI and git-hook
+  files, dangerous commands (`eval`, `rm -rf`, switched-off certificate checks),
+  invisible characters, text that reads like instructions to an AI, and
+  surprising size (rewriting over half a file, removing most of it, 200+ lines).
+- **Note**: build/dependency files, network calls, long new files.
+
+Only the lines a change *adds* are scanned, so a secret already in a file is not
+blamed on the edit. If the checker itself fails, the run stops (nothing is
+applied). Placeholders such as `changeme` or `os.environ["KEY"]` are ignored,
+and zero-width joiners are not flagged because Marathi and Hindi text needs them.
+
+Secret-looking values are masked (`AKIA****`) everywhere ORION shows or stores
+text from your files: the findings, the diff, and the tool-call previews. The
+real text is still what gets written if you apply.
+
 ### How the reader stays safe
 
 The model never touches your files directly. Each turn it can only ask for one

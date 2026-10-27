@@ -569,7 +569,7 @@ def test_no_warning_when_the_output_is_enforced(tmp_path, monkeypatch):
 
 import time
 
-from app.backend.agents.supervisor import ApprovalGate
+from app.backend.agents.supervisor import AcknowledgementRequired, ApprovalGate
 from app.backend.agents.tasks import validate_edit_files
 
 APP_TEXT = "import os\n\ndef main():\n    print('hello world')\n    return 1\n"
@@ -658,15 +658,20 @@ def test_the_edit_task_has_the_expected_steps(tmp_path):
 
     assert [(s.name, s.role) for s in steps] == [
         ("model", "supervisor"), ("open", "supervisor"), ("edit", "editor"),
-        ("approve", "supervisor"), ("apply", "supervisor"),
+        ("check", "security"), ("approve", "supervisor"), ("apply", "supervisor"),
     ]
 
 
 # ------------------------------------------------------------ running it
 
 def run_edit(monkeypatch, tmp_path, root, service, decision=None, cancel=None, before_decision=None,
-             status=None, params=None, run_id="run-1"):
-    """Run the edit task for real; ``decision`` is given from another thread, like a click."""
+             status=None, params=None, run_id="run-1", acknowledge=False):
+    """Run the edit task for real; ``decision`` is given from another thread, like a click.
+
+    If applying is refused because high-risk findings were not acknowledged, that is recorded in
+    ``run_edit.blocked`` and the click falls back to rejecting so the run can end.
+    """
+    run_edit.blocked = []
     monkeypatch.setattr(tasks, "DATA_DIR", tmp_path / "data")
     runtime = SimpleNamespace(
         status=lambda: status or ready_status(), service=service, settings=SimpleNamespace(ctx_size=8192)
@@ -683,7 +688,11 @@ def run_edit(monkeypatch, tmp_path, root, service, decision=None, cancel=None, b
                     before_decision()
 
                 if decision:
-                    gate.decide(decision)
+                    try:
+                        gate.decide(decision, acknowledge)
+                    except AcknowledgementRequired:
+                        run_edit.blocked.append(True)
+                        gate.decide("reject")
 
                 return
 
@@ -843,7 +852,7 @@ def test_editing_in_echo_mode_fails_before_anything_else(tmp_path, monkeypatch):
     result, events, _ = run_edit(monkeypatch, tmp_path, root, service, status=ready_status(provider="echo", model=None))
 
     assert result.status == "failed" and "echo mode" in result.error
-    assert titles(events, "step_started") == ["Step 1/5: Check the AI model"] and service.calls == []
+    assert titles(events, "step_started") == ["Step 1/6: Check the AI model"] and service.calls == []
 
 
 def test_the_editor_cannot_touch_secrets_or_orions_data_through_the_task(tmp_path, monkeypatch):
@@ -870,4 +879,180 @@ def test_the_apply_step_needs_a_run_id_for_its_backup(tmp_path, monkeypatch):
 
     assert result.status == "failed" and "no id" in result.error
     assert (root / "src" / "app.py").read_text() == APP_TEXT
+
+
+# -------------------------------------------------------- the security step
+
+AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+
+
+def risky_script(line):
+    return ScriptedService(
+        act("replace", path="src/app.py", find="    return 1", replace=f"    return 1\n{line}"),
+        act("finish", summary="added a line"),
+    )
+
+
+def check_event(events):
+    return [e for e in events if e.type == "check"]
+
+
+def test_a_clean_change_is_checked_and_reported_as_such(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    result, events, _ = run_edit(monkeypatch, tmp_path, root, one_edit_script(), decision="apply")
+
+    event = check_event(events)[0]
+
+    assert result.status == "completed" and event.role == "security"
+    assert event.title == "Security checks: nothing unusual found"
+    assert json.loads(event.detail) == {"findings": []}
+    assert "Step 4/6: Run security checks (plain code, no AI)" in titles(events, "step_started")
+    assert "Checked 1 file: nothing unusual found." in [e.detail for e in events if e.type == "step_finished"]
+    assert "Security checks" not in result.summary                         # nothing to report in the summary
+
+
+def test_checks_run_before_the_diff_is_shown(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    _, events, _ = run_edit(monkeypatch, tmp_path, root, one_edit_script(), decision="reject")
+    kinds = [e.type for e in events if e.type in ("check", "proposal")]
+
+    assert kinds == ["check", "proposal"]
+
+
+def test_a_secret_is_reported_but_never_stored_in_full(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    _, events, _ = run_edit(monkeypatch, tmp_path, root, risky_script(f'    key = "{AWS_KEY}"'), decision="reject")
+
+    event = check_event(events)[0]
+    finding = json.loads(event.detail)["findings"][0]
+
+    assert event.title == "Security checks: 1 high-risk finding"
+    assert finding["code"] == "aws_key" and finding["severity"] == "high" and finding["line"] == 6
+    assert finding["path"] == "src/app.py" and "AKIA****" in finding["excerpt"]
+    assert AWS_KEY not in event.detail and AWS_KEY not in event.title
+
+
+def test_a_high_risk_change_cannot_be_applied_without_acknowledging_it(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    result, _, _ = run_edit(monkeypatch, tmp_path, root, risky_script(f'    key = "{AWS_KEY}"'), decision="apply")
+
+    assert run_edit.blocked == [True]                                       # "Apply" alone was refused
+    assert (root / "src" / "app.py").read_text() == APP_TEXT                # nothing was written
+    assert result.summary.startswith("You rejected")
+
+
+def test_an_acknowledged_high_risk_change_is_applied_and_the_summary_says_so(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    result, _, _ = run_edit(
+        monkeypatch, tmp_path, root, risky_script(f'    key = "{AWS_KEY}"'), decision="apply", acknowledge=True
+    )
+
+    assert run_edit.blocked == [] and result.status == "completed"
+    assert AWS_KEY in (root / "src" / "app.py").read_text()                 # the user chose to
+    assert "Security checks: 1 high-risk finding." in result.summary
+    assert "You confirmed the high-risk findings before applying." in result.summary
+
+
+def test_rejecting_a_high_risk_change_needs_no_acknowledgement(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    result, _, _ = run_edit(monkeypatch, tmp_path, root, risky_script(f'    key = "{AWS_KEY}"'), decision="reject")
+
+    assert run_edit.blocked == [] and result.summary.startswith("You rejected")
+
+
+def test_warnings_alone_do_not_need_acknowledgement(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+    service = ScriptedService(
+        act("create", path="deploy.ps1", content="Write-Host hello\n"),
+        act("finish", summary="added a script"),
+    )
+
+    result, events, _ = run_edit(monkeypatch, tmp_path, root, service, decision="apply")
+
+    assert run_edit.blocked == [] and result.status == "completed"
+    assert (root / "deploy.ps1").exists()
+    assert check_event(events)[0].title == "Security checks: 1 warning"
+    assert "Security checks: 1 warning." in result.summary and "You confirmed" not in result.summary
+
+
+def test_a_broken_checker_fails_closed(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    def broken(changes):
+        raise RuntimeError("the checker crashed")
+
+    monkeypatch.setattr(tasks, "run_checks", broken)
+
+    result, events, statuses = run_edit(monkeypatch, tmp_path, root, one_edit_script(), decision="apply")
+
+    assert result.status == "failed" and "the checker crashed" in result.error
+    assert statuses == [] and not [e for e in events if e.type == "proposal"]     # never even asked
+    assert (root / "src" / "app.py").read_text() == APP_TEXT
+
+
+def test_with_no_changes_there_is_nothing_to_check(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+    service = ScriptedService(act("finish", summary="nothing to do"))
+
+    _, events, _ = run_edit(monkeypatch, tmp_path, root, service)
+
+    assert not check_event(events)
+    assert "Nothing to check." in [e.detail for e in events if e.type == "step_finished"]
+
+
+# --------------------------------------- secrets are masked wherever they are logged
+
+def test_the_logged_diff_hides_a_secret_but_the_file_gets_the_real_text(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    result, events, _ = run_edit(
+        monkeypatch, tmp_path, root, risky_script(f'    key = "{AWS_KEY}"'), decision="apply", acknowledge=True
+    )
+
+    proposal = [e for e in events if e.type == "proposal"][0]
+
+    assert proposal.detail.startswith("# Secret-looking values are hidden in this view (shown as ****).")
+    assert '+    key = "AKIA****"' in proposal.detail and AWS_KEY not in proposal.detail
+    assert f'key = "{AWS_KEY}"' in (root / "src" / "app.py").read_text()          # what is written is real
+
+
+def test_a_clean_diff_has_no_masking_note(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    _, events, _ = run_edit(monkeypatch, tmp_path, root, one_edit_script(), decision="reject")
+
+    assert not [e for e in events if e.type == "proposal"][0].detail.startswith("#")
+
+
+def test_tool_previews_in_the_log_hide_secrets_for_the_editor(tmp_path, monkeypatch):
+    root = edit_project(tmp_path)
+
+    _, events, _ = run_edit(monkeypatch, tmp_path, root, risky_script(f'    key = "{AWS_KEY}"'), decision="reject")
+
+    everything = " ".join(f"{e.title} {e.detail}" for e in events)
+
+    assert AWS_KEY not in everything and "AKIA****" in everything
+
+
+def test_tool_previews_in_the_log_hide_secrets_for_the_reader(tmp_path, monkeypatch):
+    root = make_project(tmp_path)
+    (root / "settings.py").write_text(f'API = "{AWS_KEY}"\nPASSWORD = "hunter2hunter2X9"\n')
+    service = ScriptedService(
+        act("read_file", path="settings.py"),
+        act("answer", answer="It holds credentials."),
+    )
+
+    result, events, = run_ask_folder(monkeypatch, root, service)
+
+    everything = " ".join(f"{e.title} {e.detail}" for e in events)
+
+    assert AWS_KEY not in everything and "hunter2hunter2X9" not in everything
+    assert 'API = "AKIA****"' in everything and 'PASSWORD = "****"' in everything
+    assert result.status == "completed"
 

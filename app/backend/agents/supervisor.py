@@ -29,6 +29,10 @@ APPROVAL_TIMEOUT_SECONDS = 30 * 60   # how long a run waits for the user's decis
 APPROVAL_POLL_SECONDS = 0.25
 
 
+class AcknowledgementRequired(Exception):
+    """Applying was chosen, but the user has not confirmed the high-risk findings."""
+
+
 class ApprovalGate:
     """Lets a paused run receive the user's decision from another thread."""
 
@@ -37,12 +41,14 @@ class ApprovalGate:
         self._lock = threading.Lock()
         self._waiting = False
         self.decision: str | None = None
+        self.needs_acknowledgement = False
 
-    def open(self) -> None:
+    def open(self, require_acknowledgement: bool = False) -> None:
         with self._lock:
             self.decision = None
             self._event.clear()
             self._waiting = True
+            self.needs_acknowledgement = require_acknowledgement
 
     def close(self) -> None:
         with self._lock:
@@ -52,11 +58,18 @@ class ApprovalGate:
     def waiting(self) -> bool:
         return self._waiting
 
-    def decide(self, decision: str) -> bool:
-        """Record the decision. False if nothing is waiting or it was already made."""
+    def decide(self, decision: str, acknowledged: bool = False) -> bool:
+        """Record the decision. False if nothing is waiting or it was already made.
+
+        Raises ``AcknowledgementRequired`` if applying while high-risk findings
+        have not been explicitly confirmed. Rejecting never needs that.
+        """
         with self._lock:
             if not self._waiting or self.decision is not None:
                 return False
+
+            if decision == "apply" and self.needs_acknowledgement and not acknowledged:
+                raise AcknowledgementRequired
 
             self.decision = decision
             self._event.set()
@@ -108,7 +121,15 @@ class StepContext:
         """Show changes waiting for the user's decision (``diff`` is the detail)."""
         self._supervisor.emit("proposal", title, role=self._step.role, detail=diff)
 
-    def wait_for_approval(self, timeout_seconds: float = APPROVAL_TIMEOUT_SECONDS) -> str:
+    def check(self, title: str, detail: str | None = None) -> None:
+        """Record the result of a check (``detail`` is JSON the page can read)."""
+        self._supervisor.emit("check", title, role=self._step.role, detail=detail)
+
+    def wait_for_approval(
+        self,
+        timeout_seconds: float = APPROVAL_TIMEOUT_SECONDS,
+        require_acknowledgement: bool = False,
+    ) -> str:
         """Pause the run until the user decides. Returns "apply" or "reject".
 
         The run shows as "awaiting approval" meanwhile. Cancelling raises
@@ -121,7 +142,7 @@ class StepContext:
         if gate is None:
             raise StepFailed("this run cannot ask for approval")
 
-        gate.open()
+        gate.open(require_acknowledgement)
         supervisor.set_status("awaiting_approval")
         began = supervisor.clock()
 

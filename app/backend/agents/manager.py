@@ -44,12 +44,16 @@ class RunManager:
 
         return True
 
-    def decide(self, run_id: str, decision: str) -> bool:
-        """Give a waiting run the user's decision. False if it is not waiting."""
+    def decide(self, run_id: str, decision: str, acknowledged: bool = False) -> bool:
+        """Give a waiting run the user's decision. False if it is not waiting.
+
+        Raises ``AcknowledgementRequired`` for an unconfirmed apply of a
+        change with high-risk findings.
+        """
         with self._lock:
             gate = self._gates.get(run_id)
 
-        return gate is not None and gate.decide(decision)
+        return gate is not None and gate.decide(decision, acknowledged)
 
     def cancel_all(self) -> None:
         """Ask every running run to stop (used when ORION shuts down)."""

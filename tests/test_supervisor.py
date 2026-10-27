@@ -6,6 +6,7 @@ from app.backend.agents.events import ListSink
 import time
 
 from app.backend.agents.supervisor import (
+    AcknowledgementRequired,
     ApprovalGate,
     Limits,
     RunCancelled,
@@ -457,4 +458,74 @@ def test_a_failing_status_hook_does_not_break_the_run():
     result = supervisor.run([step("ask", lambda ctx: ctx.wait_for_approval())])
 
     assert result.status == "completed"
+
+
+# ------------------------------------------------- confirming high-risk findings
+
+def test_applying_a_high_risk_change_needs_an_explicit_acknowledgement():
+    gate = ApprovalGate()
+    gate.open(require_acknowledgement=True)
+
+    with pytest.raises(AcknowledgementRequired):
+        gate.decide("apply")
+
+    assert gate.waiting and gate.decision is None                       # nothing was decided
+    assert gate.decide("apply", acknowledged=True) is True
+    assert gate.decision == "apply"
+
+
+def test_rejecting_never_needs_an_acknowledgement():
+    gate = ApprovalGate()
+    gate.open(require_acknowledgement=True)
+
+    assert gate.decide("reject") is True and gate.decision == "reject"
+
+
+def test_an_ordinary_approval_needs_no_acknowledgement_and_the_flag_resets():
+    gate = ApprovalGate()
+    gate.open(require_acknowledgement=True)
+    gate.decide("reject")
+    gate.close()
+
+    gate.open()                                                         # the next question is not risky
+
+    assert gate.needs_acknowledgement is False
+    assert gate.decide("apply") is True
+
+
+def test_a_step_can_require_acknowledgement_and_waits_through_a_refused_attempt():
+    supervisor, _, _, gate, _ = make_with_gate()
+    outcomes = []
+
+    def click():
+        for _ in range(300):
+            if gate.waiting:
+                break
+
+            time.sleep(0.01)
+
+        try:
+            gate.decide("apply")
+        except AcknowledgementRequired:
+            outcomes.append("refused")
+
+        outcomes.append(gate.decide("apply", acknowledged=True))
+
+    threading.Thread(target=click, daemon=True).start()
+    seen = []
+
+    result = supervisor.run([step("ask", lambda ctx: seen.append(ctx.wait_for_approval(require_acknowledgement=True)))])
+
+    assert result.status == "completed" and seen == ["apply"] and outcomes == ["refused", True]
+
+
+def test_check_results_are_logged_with_their_data():
+    supervisor, sink, _, _ = make()
+
+    supervisor.run([step("check", lambda ctx: ctx.check("Security checks: nothing unusual found", '{"findings": []}'), role="security")])
+
+    event = [e for e in sink.events if e.type == "check"][0]
+
+    assert event.title == "Security checks: nothing unusual found"
+    assert event.detail == '{"findings": []}' and event.role == "security"
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.backend.agents.changes import ChangeError, ChangeSet, backup_dir_for
+from app.backend.agents.checks import has_high, redact_secrets, run_checks, summarize, to_json
 from app.backend.agents.editor import Editor
 from app.backend.agents.reader import Reader, reply_tokens_for
 from app.backend.agents.supervisor import Limits, Step, StepContext, StepFailed
@@ -303,6 +304,11 @@ def _open_folder(ctx: StepContext) -> str:
     return f"Read-only access to {workspace.root}\n\n{workspace.overview()}"
 
 
+def _hide_secrets(detail: str | None) -> str | None:
+    """Tool previews go into the run's log, so secret-looking values are masked first."""
+    return redact_secrets(detail) if detail else detail
+
+
 def _model_asker(ctx: StepContext, runtime, reply_tokens: int):
     """The function the reader/editor use to get one structured reply from the model."""
     warned = []
@@ -345,7 +351,7 @@ def _explore(ctx: StepContext) -> str:
         ctx.state["workspace"],
         ctx.state["params"]["question"],
         ask,
-        notify=lambda title, detail, ms: ctx.tool(title, detail, ms),
+        notify=lambda title, detail, ms: ctx.tool(title, _hide_secrets(detail), ms),
         check_cancelled=ctx.check_cancelled,
         seconds_left=ctx.seconds_left,
         ctx_size=ctx_size,
@@ -439,7 +445,7 @@ def _make_edits(ctx: StepContext) -> str:
         changes,
         ctx.state["params"]["instruction"],
         _model_asker(ctx, runtime, reply_tokens),
-        notify=lambda title, detail, ms: ctx.tool(title, detail, ms),
+        notify=lambda title, detail, ms: ctx.tool(title, _hide_secrets(detail), ms),
         check_cancelled=ctx.check_cancelled,
         seconds_left=ctx.seconds_left,
         ctx_size=ctx_size,
@@ -459,6 +465,20 @@ def _make_edits(ctx: StepContext) -> str:
     return f"{_plural(files, 'file')} staged (+{added} \u2212{removed}). Nothing has been written yet."
 
 
+def _security_checks(ctx: StepContext) -> str:
+    """Plain-code checks of what is about to be written. No AI involved."""
+    if ctx.state.get("no_changes"):
+        return "Nothing to check."
+
+    changes: ChangeSet = ctx.state["changes"]
+    findings = run_checks(changes)
+    ctx.state["findings"] = findings
+
+    ctx.check(f"Security checks: {summarize(findings)}", to_json(findings))
+
+    return f"Checked {_plural(len(changes.files()), 'file')}: {summarize(findings)}."
+
+
 def _ask_approval(ctx: StepContext) -> str:
     if ctx.state.get("no_changes"):
         return "Nothing to approve."
@@ -466,12 +486,26 @@ def _ask_approval(ctx: StepContext) -> str:
     changes: ChangeSet = ctx.state["changes"]
     files, added, removed = changes.stats()
 
+    # The diff is shown and logged, so secret-looking values are masked in this view
+    # (the real text is what gets written).
+    diff = changes.diff()
+    shown = redact_secrets(diff, diff=True)
+
+    if shown != diff:
+        shown = (
+            "# Secret-looking values are hidden in this view (shown as ****). "
+            "The real text will be written.\n" + shown
+        )
+
     ctx.proposal(
         f"Proposed changes: {_plural(files, 'file')} (+{added} \u2212{removed})",
-        changes.diff(),
+        shown,
     )
 
-    decision = ctx.wait_for_approval()
+    # High-risk findings mean "Apply" is not enough: the user must confirm them.
+    decision = ctx.wait_for_approval(
+        require_acknowledgement=has_high(ctx.state.get("findings", []))
+    )
     ctx.state["decision"] = decision
 
     return "You approved the changes." if decision == "apply" else "You rejected the changes."
@@ -506,9 +540,15 @@ def _apply_changes(ctx: StepContext) -> str:
         raise StepFailed(str(exc)) from exc
 
     names = ", ".join(f"`{name}`" for name in report.written + report.created)
+    findings = ctx.state.get("findings", [])
+    checked = f"\n\nSecurity checks: {summarize(findings)}." if findings else ""
+
+    if has_high(findings):
+        checked += " You confirmed the high-risk findings before applying."
+
     ctx.state["summary"] = (
         f"**Applied {_plural(files, 'file change')}** (+{added} \u2212{removed}): {names}.\n\n"
-        f"{said}\n\nOriginals are backed up; use **Undo changes** on this page to put them back."
+        f"{said}{checked}\n\nOriginals are backed up; use **Undo changes** on this page to put them back."
     ).strip()
 
     return f"Wrote {_plural(files, 'file')}. A backup of the originals was saved."
@@ -524,6 +564,7 @@ def _edit_files_steps(params: dict) -> list[Step]:
         Step("model", "Check the AI model", prime),
         Step("open", "Open the folder", _open_for_edit),
         Step("edit", "Plan and prepare the edits (nothing is written yet)", _make_edits, role="editor"),
+        Step("check", "Run security checks (plain code, no AI)", _security_checks, role="security"),
         Step("approve", "Wait for your approval", _ask_approval),
         Step("apply", "Apply the changes", _apply_changes),
     ]

@@ -11,6 +11,7 @@ from typing import Protocol
 #   step_skipped   an optional step failed and the run carried on
 #   tool_call      a step used a tool (e.g. the reader opened a file)
 #   proposal       changes waiting for the user's approval (detail is the diff)
+#   check          results of the security checks (detail is JSON: {"findings": [...]})
 #   info / warning a note from inside a step
 #   run_finished   the run ended (completed, failed or cancelled)
 EVENT_TYPES = (
@@ -21,6 +22,7 @@ EVENT_TYPES = (
     "step_skipped",
     "tool_call",
     "proposal",
+    "check",
     "info",
     "warning",
     "run_finished",
