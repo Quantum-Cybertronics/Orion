@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 from app.backend.agents.supervisor import StepFailed
 from app.backend.ai.tokens import estimate_tokens
+from app.backend.ai.base import AIOutputLimitError
 
 MAX_TOOL_CALLS = 10
 MAX_DUPLICATES = 3          # repeating the same call this often forces a final answer
@@ -130,6 +131,7 @@ class ToolLoop:
         duplicates = 0
         repairs = 0
         forced = False
+        output_retries = 0
 
         while True:
             self.check_cancelled()
@@ -139,12 +141,40 @@ class ToolLoop:
 
             if not forced and (self.tool_calls >= self.max_tool_calls or duplicates >= MAX_DUPLICATES):
                 forced = True
-                self._messages.append({"role": "user", "content": self.forced_message})
+                # The newest tool result is already a user turn. Strict chat
+                # templates (Gemma) reject consecutive user messages.
+                if self._messages[-1]["role"] == "user":
+                    self._messages[-1]["content"] += "\n\n" + self.forced_message
+                else:
+                    self._messages.append({"role": "user", "content": self.forced_message})
 
             self._fit()
 
             began = time.monotonic()
-            raw = self.ask(self._messages, self.schema(forced))
+            try:
+                raw = self.ask(self._messages, self.schema(forced))
+            except AIOutputLimitError as exc:
+                self.check_cancelled()
+                if output_retries >= 1:
+                    raise StepFailed(
+                        "The model hit its output limit again after one concise retry. "
+                        "No partial action was executed. Review the request or model settings; "
+                        "this is not a context-window error."
+                    ) from exc
+                output_retries += 1
+                self.notify("Output limit reached; retrying once",
+                            "Discarded the incomplete response. Retrying one concise JSON action "
+                            "with the same scope and token budget.", 0)
+                instruction = (
+                    "Your previous response exceeded the output token limit and was discarded. "
+                    "Return exactly one concise JSON action. Use a short why, only fields required "
+                    "by that action, and no prose or repeated exclusions. For an edit, use the "
+                    "smallest unique find/replace, not the whole file. Do not broaden scope."
+                )
+                # Do not add an assistant message containing incomplete/untrusted JSON.
+                # Merge into the user turn to preserve strict Gemma role alternation.
+                self._messages[-1]["content"] += "\n\n" + instruction
+                continue
 
             self.check_cancelled()
 

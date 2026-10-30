@@ -23,6 +23,7 @@ let runs = [];              // newest first
 let selectedRunId = null;
 let lastSeq = 0;            // newest event already on screen
 let pollTimer = null;
+let approvalStage = "diff";
 let latestFindings = null;  // the security checks of the selected run (null: none yet)
 let taskCards = [];         // [{kind, button, inputs}] for each kind of run
 let fieldLabels = {};       // field name -> label, for showing a run's parameters
@@ -452,7 +453,7 @@ function renderEvent(event) {
 
     if (findings) {
         body.appendChild(renderFindings(findings));
-    } else if (event.detail && event.type === "proposal") {
+    } else if (event.detail && event.type === "proposal" && !event.title.startsWith("Proposed plan")) {
         body.appendChild(renderDiff(event.detail));
     } else if (event.detail) {
         const detail = document.createElement("div");
@@ -515,6 +516,12 @@ function renderParams(run) {
 
 // What the approval bar says, given the security checks (if they have run).
 function renderApprovalBar() {
+    if (approvalStage === "plan") {
+        approvalText.textContent = "Review the plan and exact file scope. Approval only permits preparing edits; final diff approval is still required. Tests will not run yet.";
+        applyButton.textContent = "Approve plan";
+        applyButton.className = "approval-apply";
+        return;
+    }
     const high = countFindings("high");
     const warnings = countFindings("warning");
     const base = "Nothing has been written yet.";
@@ -608,6 +615,7 @@ function showNoRunSelected() {
     selectedRunId = null;
     lastSeq = 0;
     latestFindings = null;
+    approvalStage = "diff";
 
     runParams.hidden = true;
     runParams.dataset.runId = "";
@@ -629,6 +637,7 @@ function selectRun(runId) {
     selectedRunId = runId;
     lastSeq = 0;
     latestFindings = null;
+    approvalStage = "diff";
 
     timeline.innerHTML = "";
     runSummary.hidden = true;
@@ -691,6 +700,9 @@ async function pollEvents() {
             timeline.appendChild(renderEvent(event));
             lastSeq = event.seq;
 
+            if (event.type === "proposal") {
+                approvalStage = event.title.startsWith("Proposed plan") ? "plan" : "diff";
+            }
             if (event.type === "check") {
                 latestFindings = parseFindings(event.detail);
             }

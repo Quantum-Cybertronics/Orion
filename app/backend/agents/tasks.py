@@ -9,6 +9,7 @@ Later tasks add steps that edit files and check the edits.
 """
 
 import os
+import json
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -16,11 +17,14 @@ from pathlib import Path
 
 from app.backend.agents.changes import ChangeError, ChangeSet, backup_dir_for
 from app.backend.agents.checks import has_high, redact_secrets, run_checks, summarize, to_json
+from app.backend.agents.verification import verify
+from app.backend.agents.snapshot import ProjectSnapshot
+from app.backend.agents.planner import Planner
 from app.backend.agents.editor import Editor
 from app.backend.agents.reader import Reader, reply_tokens_for
 from app.backend.agents.supervisor import Limits, Step, StepContext, StepFailed
 from app.backend.agents.workspace import Workspace, WorkspaceError
-from app.backend.ai.base import AIProviderError
+from app.backend.ai.base import AIProviderError, AIOutputLimitError
 from app.backend.ai.runtime import get_runtime
 from app.backend.config import DATA_DIR
 
@@ -270,7 +274,19 @@ def validate_edit_files(params: Mapping, env: Mapping[str, str] = os.environ) ->
     if resolved.parent == resolved:
         raise ParamError("Pick a specific project folder, not a whole drive.")
 
-    return {"folder": str(resolved), "instruction": instruction}
+    mode = str(params.get("verification") or "syntax").strip().lower()
+    if mode not in ("syntax", "pytest"):
+        raise ParamError("Verification must be syntax or pytest.")
+    python = _clean_folder(params.get("python"))
+    if not python:
+        candidate = resolved / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if candidate.is_file():
+            python = str(candidate)
+    if python and (not Path(python).is_absolute() or not Path(python).is_file()):
+        raise ParamError("Python must be an existing absolute executable path, not a command or arguments.")
+    if mode == "pytest" and not python:
+        raise ParamError("Select a project Python executable for pytest; ORION will not use its own environment.")
+    return {"folder": str(resolved), "instruction": instruction, "verification": mode, "python": python}
 
 
 def _require_model(ctx: StepContext) -> str:
@@ -318,6 +334,8 @@ def _model_asker(ctx: StepContext, runtime, reply_tokens: int):
             reply = runtime.service.generate_structured(
                 messages, schema, max_tokens=reply_tokens
             )
+        except AIOutputLimitError:
+            raise
         except AIProviderError as exc:
             raise StepFailed(str(exc)) from exc
 
@@ -435,7 +453,85 @@ def _open_for_edit(ctx: StepContext) -> str:
     )
 
 
+def _plan_edits(ctx: StepContext) -> str:
+    runtime = get_runtime()
+    tokens = reply_tokens_for(runtime.settings.ctx_size)
+    planner = Planner(
+        ChangeSet(ctx.state["workspace"]), ctx.state["params"]["instruction"],
+        _model_asker(ctx, runtime, tokens),
+        notify=lambda title, detail, ms: ctx.tool(title, _hide_secrets(detail), ms),
+        check_cancelled=ctx.check_cancelled, seconds_left=ctx.seconds_left,
+        ctx_size=runtime.settings.ctx_size, reply_tokens=tokens,
+    )
+    plan = planner.run()
+    if not plan.files:
+        raise StepFailed("No safe file scope was proposed. " + plan.summary)
+    ctx.state["plan"] = plan
+    return "A read-only plan is ready; no edits have been prepared."
+
+
+def _approve_plan(ctx: StepContext) -> str:
+    plan = ctx.state["plan"]
+    detail = json.dumps({
+        "stage": "plan", "summary": plan.summary, "files": plan.files,
+        "model_proposed_verification": plan.verification, "out_of_scope": plan.out_of_scope,
+        "verification": {
+            "syntax": "Compile approved Python files with ORION host Python; do not import or execute them",
+            "pytest": ([ctx.state["params"].get("python"), "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+                       if ctx.state["params"].get("verification") == "pytest" else "NOT RUN"),
+            "timeout_seconds": 120,
+            "warning": "Pytest executes project code with your account privileges. "
+                       "The copy is not a sandbox; tests can access files/network. "
+                       "No installs. Third-party pytest plugin autoload disabled.",
+        },
+        "notice": "Approval permits edits in a disposable working copy only. Originals stay unchanged. "
+                  "Approval includes only the displayed verification preset. "
+                  "A separate diff approval is required before writing.",
+    }, indent=2)
+    ctx.proposal("Proposed plan (approve before preparing edits)", redact_secrets(detail))
+    if ctx.wait_for_approval() != "apply":
+        raise StepFailed("Plan rejected; no edits were prepared or written.")
+    ctx.state["plan_approved"] = True
+    try:
+        snapshot = ProjectSnapshot(ctx.state["workspace"], DATA_DIR / "snapshots", ctx.check_cancelled)
+        ctx.state.setdefault("cleanups", []).append(snapshot.cleanup)
+        ctx.state["snapshot"] = snapshot
+        # Existing approved files must be present; skipped files cannot be
+        # misclassified as approved new files.
+        for name in plan.files:
+            original = snapshot.source.resolve(name)
+            if original.exists() and name not in snapshot.hashes:
+                raise ChangeError(f"{name} was excluded from the snapshot; choose another scope.")
+        ctx.state["workspace"] = snapshot.workspace
+        ctx.state["changes"] = ChangeSet(snapshot.workspace, allowed_files=plan.files)
+        ctx.info("Isolated working copy created",
+                 f"Copied {len(snapshot.hashes)} files; skipped {len(snapshot.skipped)} entries. "
+                 "No commands run. This is not a security sandbox.")
+    except (OSError, WorkspaceError, ChangeError) as exc:
+        raise StepFailed(f"Could not create a safe working copy: {exc}") from exc
+    ctx.state["baseline_ok"] = verify(ctx, "baseline")
+    if not ctx.state["baseline_ok"]:
+        raise StepFailed("Baseline verification failed before editing. Originals unchanged; "
+                         "review results and fix the environment or existing failures first.")
+    return "Plan approved. Only the listed files may be changed."
+
+
+def _editor_instruction(state: dict) -> str:
+    """Pass a compact approved contract, never a verbose dataclass repr."""
+    plan = state["plan"]
+    return (
+        state["params"]["instruction"]
+        + "\nApproved file scope: " + ", ".join(plan.files)
+        + "\nApproved behavior: " + plan.summary[:400]
+        + "\nExcluded: " + plan.out_of_scope[:240]
+        + "\nPrepare only the requested edits in this working copy. "
+          "Return one concise JSON action per turn; omit unrelated optional fields."
+    )
+
+
 def _make_edits(ctx: StepContext) -> str:
+    if not ctx.state.get("plan_approved"):
+        raise StepFailed("Approve a plan before preparing edits.")
     runtime = get_runtime()
     ctx_size = runtime.settings.ctx_size
     reply_tokens = reply_tokens_for(ctx_size)
@@ -443,7 +539,7 @@ def _make_edits(ctx: StepContext) -> str:
 
     editor = Editor(
         changes,
-        ctx.state["params"]["instruction"],
+        _editor_instruction(ctx.state),
         _model_asker(ctx, runtime, reply_tokens),
         notify=lambda title, detail, ms: ctx.tool(title, _hide_secrets(detail), ms),
         check_cancelled=ctx.check_cancelled,
@@ -460,6 +556,8 @@ def _make_edits(ctx: StepContext) -> str:
 
         return "The editor proposed no changes."
 
+    if ctx.state.get("snapshot"):
+        ctx.state["snapshot"].materialize(changes)
     files, added, removed = changes.stats()
 
     return f"{_plural(files, 'file')} staged (+{added} \u2212{removed}). Nothing has been written yet."
@@ -471,6 +569,11 @@ def _security_checks(ctx: StepContext) -> str:
         return "Nothing to check."
 
     changes: ChangeSet = ctx.state["changes"]
+    if ctx.state.get("snapshot"):
+        ctx.state["verification_ok"] = verify(ctx, "post_change") and ctx.state.get("baseline_ok", False)
+        if not ctx.state["verification_ok"]:
+            raise StepFailed("Verification failed (baseline or post-change). Originals unchanged; "
+                             "review the recorded results. Automatic repairs are not enabled.")
     findings = run_checks(changes)
     ctx.state["findings"] = findings
 
@@ -513,6 +616,10 @@ def _ask_approval(ctx: StepContext) -> str:
 
 def _apply_changes(ctx: StepContext) -> str:
     said = ctx.state.get("editor_summary", "")
+    if ctx.state.get("post_change_verification"):
+        said += "\n\nVerification: " + "; ".join(
+            r["check"] + " " + r["status"] for r in ctx.state["post_change_verification"]
+        ) + ". Syntax uses ORION host Python; pytest runs only when selected."
 
     if ctx.state.get("no_changes"):
         ctx.state["summary"] = f"No changes were proposed.\n\n{said}".strip()
@@ -535,8 +642,12 @@ def _apply_changes(ctx: StepContext) -> str:
     files, added, removed = changes.stats()
 
     try:
+        if ctx.state.get("snapshot"):
+            if not ctx.state.get("verification_ok"):
+                raise ChangeError("Verification has not passed; applying is blocked.")
+            changes = ctx.state["snapshot"].original_changes(changes)
         report = changes.apply(backup_dir_of(run_id))
-    except ChangeError as exc:
+    except (ChangeError, WorkspaceError, OSError) as exc:
         raise StepFailed(str(exc)) from exc
 
     names = ", ".join(f"`{name}`" for name in report.written + report.created)
@@ -563,7 +674,9 @@ def _edit_files_steps(params: dict) -> list[Step]:
     return [
         Step("model", "Check the AI model", prime),
         Step("open", "Open the folder", _open_for_edit),
-        Step("edit", "Plan and prepare the edits (nothing is written yet)", _make_edits, role="editor"),
+        Step("plan", "Inspect and propose an exact file scope", _plan_edits, role="planner"),
+        Step("approve_plan", "Approve the plan before editing", _approve_plan),
+        Step("edit", "Prepare approved edits (nothing is written yet)", _make_edits, role="editor"),
         Step("check", "Run security checks (plain code, no AI)", _security_checks, role="security"),
         Step("approve", "Wait for your approval", _ask_approval),
         Step("apply", "Apply the changes", _apply_changes),
@@ -575,13 +688,17 @@ EDIT_FILES = Task(
     title="Edit files in a folder",
     description=(
         "The editor makes small changes to files in a folder, as you describe. "
-        "You review a diff first; nothing is written until you click Apply, and you can undo afterwards."
+        "Approve a read-only plan and exact file scope first, then review a separate diff. "
+        "Originals stay unchanged until final approval. Syntax checks run by default; "
+        "select pytest explicitly to execute project tests."
     ),
     build=_edit_files_steps,
     limits=Limits(max_steps=10, max_seconds=3600),
     fields=(
         Field("folder", "Folder", "text", "Full path, e.g. D:\\Projects\\myapp"),
         Field("instruction", "What to change", "textarea", "e.g. In util.py, rename the function helper to compute"),
+        Field("verification", "Verification preset", "text", "syntax (default), or pytest (executes project code)"),
+        Field("python", "Project Python executable", "text", "Optional for syntax; pytest defaults to project .venv, otherwise enter full path"),
     ),
     validate=validate_edit_files,
     run_title=lambda params: "Edit: " + (

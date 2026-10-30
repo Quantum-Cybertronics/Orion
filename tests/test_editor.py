@@ -429,3 +429,52 @@ def test_the_provider_never_drops_anything_the_editor_sent(tmp_path, ctx_size):
         assert "no longer fits" in str(exc)
 
     assert dropped and all(d == 0 for d in dropped), (ctx_size, sent, dropped)
+
+
+@pytest.mark.parametrize("trigger", ["limit", "duplicates"])
+def test_forced_finish_preserves_gemma_role_alternation(tmp_path, trigger):
+    from app.backend.agents.loop import MAX_DUPLICATES
+    read = act("read_file", path="src/app.py")
+    replies = [read] if trigger == "limit" else [read] * (MAX_DUPLICATES + 1)
+    editor, changes, script, notes, root = make(
+        tmp_path, *replies, act("finish", summary="No edits"),
+        max_tool_calls=1 if trigger == "limit" else 100,
+    )
+    editor.run()
+    for messages, schema in script.calls:
+        roles = [m["role"] for m in messages if m["role"] != "system"]
+        assert roles == ["user" if i % 2 == 0 else "assistant" for i in range(len(roles))]
+        assert roles[-1] == "user"
+    assert editor.forced_message in script.calls[-1][0][-1]["content"]
+    assert "Result of" in script.calls[-1][0][-1]["content"]
+    assert not changes
+
+
+@pytest.mark.parametrize('repeat', [False, True])
+def test_output_limit_has_one_bounded_retry_and_never_executes_partial_action(tmp_path, repeat):
+    from app.backend.ai.base import AIOutputLimitError
+    responses = [AIOutputLimitError('output limit')]
+    if repeat:
+        responses.append(AIOutputLimitError('output limit'))
+    else:
+        responses.extend([
+            act('replace', path='src/app.py', find='    return 1', replace='    return 2'),
+            act('finish', summary='Changed return value'),
+        ])
+    editor, changes, script, notes, root = make(tmp_path, *responses)
+    if repeat:
+        with pytest.raises(StepFailed, match='after one concise retry'):
+            editor.run()
+        assert not changes
+        assert editor.tool_calls == 0
+        assert len(script.calls) == 2
+    else:
+        editor.run()
+        assert changes.files()[0].current.endswith('    return 2\n')
+        assert editor.tool_calls == 1
+    assert (root / 'src/app.py').read_text() == APP
+    assert sum('retrying once' in title for title, _, _ in notes) == 1
+    for messages, schema in script.calls:
+        roles = [m['role'] for m in messages if m['role'] != 'system']
+        assert roles == ['user' if i % 2 == 0 else 'assistant' for i in range(len(roles))]
+    assert 'same scope' in notes[0][1]

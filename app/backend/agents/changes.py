@@ -53,6 +53,10 @@ class ChangeError(Exception):
     """A change that cannot be made. The message is safe to show the model."""
 
 
+class ScopeViolation(ChangeError):
+    """An edit exceeds the approved plan; the run must stop."""
+
+
 @dataclass
 class FileChange:
     path: str                    # relative to the folder, forward slashes
@@ -129,12 +133,15 @@ class ChangeSet:
         workspace: Workspace,
         max_files: int = MAX_FILES,
         max_edits: int = MAX_EDITS,
+        allowed_files: tuple[str, ...] | None = None,
     ) -> None:
         self.workspace = workspace
         self.max_files = max_files
         self.max_edits = max_edits
         self._changes: dict[str, FileChange] = {}
         self._edit_count = 0
+        self.allowed_files = (frozenset(self._target(p)[0] for p in allowed_files)
+                              if allowed_files is not None else None)
 
     # -- what is staged --------------------------------------------------------
 
@@ -204,6 +211,13 @@ class ChangeSet:
 
         return shown, resolved
 
+    def _check_scope(self, shown: str) -> None:
+        if self.allowed_files is not None and shown not in self.allowed_files:
+            raise ScopeViolation(
+                f"'{shown}' is outside the approved file scope. "
+                "Stop and request a new plan; do not change another file instead."
+            )
+
     def _load(self, shown: str, absolute: Path, requested: str) -> FileChange:
         """Read a file from disk for editing, refusing anything unsafe to rewrite."""
         if not absolute.exists():
@@ -269,6 +283,7 @@ class ChangeSet:
     def replace(self, path: str | None, find: str | None, replace: str | None) -> str:
         """Replace ONE exact occurrence of ``find`` with ``replace`` in a file."""
         shown, absolute = self._target(path)
+        self._check_scope(shown)
         change = self._changes.get(shown) or self._load(shown, absolute, str(path))
 
         find = (find or "").replace("\r\n", "\n")
@@ -311,6 +326,7 @@ class ChangeSet:
     def create(self, path: str | None, content: str | None) -> str:
         """Stage a brand-new file (its path must not exist yet)."""
         shown, absolute = self._target(path)
+        self._check_scope(shown)
 
         if shown in self._changes:
             raise ChangeError(f"'{shown}' was already changed in this task; use 'replace' to adjust it.")
@@ -434,6 +450,7 @@ class ChangeSet:
         plan: list[tuple[FileChange, Path]] = []
 
         for change in changes:
+            self._check_scope(change.path)
             try:
                 absolute = self.workspace.resolve(change.path)
             except WorkspaceError as exc:

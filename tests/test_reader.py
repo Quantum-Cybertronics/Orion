@@ -229,7 +229,8 @@ def test_the_tool_call_cap_forces_a_final_answer(tmp_path):
     schema = script.calls[-1][1]
     assert schema["properties"]["action"]["enum"] == ["answer"]
     assert schema["required"] == ["why", "action", "answer"]
-    assert "Tool calls used: 3 of 3" in script.calls[-1][0][-2]["content"]
+    assert "Tool calls used: 3 of 3" in script.calls[-1][0][-1]["content"]
+    assert reader.forced_message in script.calls[-1][0][-1]["content"]
 
 
 def test_asking_for_another_tool_after_the_cap_is_not_obeyed(tmp_path):

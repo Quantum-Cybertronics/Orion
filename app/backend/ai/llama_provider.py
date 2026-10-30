@@ -11,7 +11,7 @@ import threading
 from collections.abc import Callable, Iterator
 from datetime import datetime
 
-from app.backend.ai.base import AIProvider, AIProviderError
+from app.backend.ai.base import AIProvider, AIProviderError, AIOutputLimitError
 from app.backend.ai.gbnf import extract_json_object, schema_to_gbnf
 from app.backend.ai.llama_server import LlamaServerError, LlamaServerManager
 from app.backend.ai.tokens import estimate_tokens
@@ -291,9 +291,9 @@ class LlamaServerProvider(AIProvider):
             ) from exc
 
         if choice.get("finish_reason") == "length":
-            raise AIProviderError(
-                "The model's reply was cut off before it finished. "
-                "Try a shorter question or a larger context size."
+            raise AIOutputLimitError(
+                "The model's reply was cut off at its generation/output token limit. "
+                "No partial action was executed. This is not evidence of context-window exhaustion."
             )
 
         return text

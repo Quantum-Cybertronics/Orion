@@ -6,6 +6,10 @@ class AIProviderError(RuntimeError):
     """The AI backend could not produce a reply (message is safe to show)."""
 
 
+class AIOutputLimitError(AIProviderError):
+    """Generation hit an output limit; no partial response is safe to execute."""
+
+
 class AIProvider(ABC):
     @abstractmethod
     def generate(

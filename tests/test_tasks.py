@@ -595,7 +595,7 @@ def test_valid_edit_parameters_are_normalised(tmp_path):
 
     result = validate_edit_files({"folder": f' "{root}" ', "instruction": "  Make   main\nreturn 2 "}, env={})
 
-    assert result == {"folder": str(root.resolve()), "instruction": "Make main return 2"}
+    assert result == {"folder": str(root.resolve()), "instruction": "Make main return 2", "verification": "syntax", "python": ""}
 
 
 @pytest.mark.parametrize(
@@ -649,7 +649,7 @@ def test_edit_run_titles_and_form():
 
     assert task.title_for({"instruction": "Fix it"}) == "Edit: Fix it"
     assert task.title_for({"instruction": "x" * 100}) == "Edit: " + "x" * 57 + "..."
-    assert [(f.name, f.kind) for f in task.fields] == [("folder", "text"), ("instruction", "textarea")]
+    assert [(f.name, f.kind) for f in task.fields] == [("folder", "text"), ("instruction", "textarea"), ("verification", "text"), ("python", "text")]
     assert task.limits.max_seconds >= 3600                                  # waiting for you must not time out the run
 
 
@@ -657,7 +657,8 @@ def test_the_edit_task_has_the_expected_steps(tmp_path):
     steps = tasks.EDIT_FILES.build(edit_params(edit_project(tmp_path)))
 
     assert [(s.name, s.role) for s in steps] == [
-        ("model", "supervisor"), ("open", "supervisor"), ("edit", "editor"),
+        ("model", "supervisor"), ("open", "supervisor"),
+        ("plan", "planner"), ("approve_plan", "supervisor"), ("edit", "editor"),
         ("check", "security"), ("approve", "supervisor"), ("apply", "supervisor"),
     ]
 
@@ -703,9 +704,13 @@ def run_edit(monkeypatch, tmp_path, root, service, decision=None, cancel=None, b
 
     supervisor = Supervisor(
         sink, cancel, tasks.EDIT_FILES.limits, gate=gate, status_hook=statuses.append,
-        state={"run_id": run_id},
+        state={"run_id": run_id, "plan_approved": True, "plan": SimpleNamespace(files=("src/app.py", "src/util.py", "README.md"), summary="Legacy edit fixture", out_of_scope="No unrelated changes")},
     )
-    result = supervisor.run(tasks.EDIT_FILES.build(params or edit_params(root)), title="Edit: test")
+    # These regression cases exercise the editor/diff/apply stages in isolation.
+    # Full two-gate behavior is exercised in test_planning.py.
+    steps = [step for step in tasks.EDIT_FILES.build(params or edit_params(root))
+             if step.name not in ("plan", "approve_plan")]
+    result = supervisor.run(steps, title="Edit: test")
 
     return result, sink.events, statuses
 

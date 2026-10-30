@@ -146,6 +146,8 @@ def test_kinds_lists_both_tasks_and_describes_their_forms():
     assert [(f["name"], f["kind"]) for f in body["edit_files"]["fields"]] == [
         ("folder", "text"),
         ("instruction", "textarea"),
+        ("verification", "text"),
+        ("python", "text"),
     ]
     assert body["self_check"]["title"] == "Self-check" and body["self_check"]["description"]
     assert body["self_check"]["fields"] == []
@@ -391,6 +393,10 @@ class ScriptedService:
         self.replies = list(replies)
 
     def generate_structured(self, messages, schema, *, max_tokens=None):
+        if "verification" in schema.get("properties", {}):
+            return json.dumps({"why": "plan", "action": "finish", "summary": "Change main to return 2",
+                               "files": list(dict.fromkeys(["src/app.py"] + [r["path"] for r in self.replies if r.get("action") in ("replace", "create")])), "verification": "Proposed pytest; not run",
+                               "out_of_scope": "No unrelated changes"})
         return json.dumps(self.replies.pop(0))
 
 
@@ -553,7 +559,14 @@ def one_edit(monkeypatch):
 
 
 def start_edit(client, root, instruction="Make main return 2"):
-    return start_with(client, "edit_files", {"folder": str(root), "instruction": instruction})
+    run = start_with(client, "edit_files", {"folder": str(root), "instruction": instruction})
+    # Legacy API cases below start at the final diff gate. New plan-gate
+    # rejection/approval behavior has dedicated integration coverage.
+    wait_for_status(client, run["id"], "awaiting_approval")
+    assert client.post(f"/runs/{run['id']}/decision", json={"decision": "apply"}).status_code == 200
+    wait_for(lambda: any(e["type"] == "step_finished" and "Plan approved." in (e.get("detail") or "")
+                        for e in client.get(f"/runs/{run['id']}/events").json()["events"]))
+    return run
 
 
 def wait_for_status(client, run_id, status):
@@ -574,7 +587,7 @@ def test_an_edit_waits_for_approval_then_writes_and_can_be_undone(tmp_path, monk
 
     waiting = wait_for_status(client, run["id"], "awaiting_approval")
     events = client.get(f"/runs/{run['id']}/events").json()["events"]
-    proposal = [e for e in events if e["type"] == "proposal"][0]
+    proposal = [e for e in events if e["type"] == "proposal" and e["title"].startswith("Proposed changes:")][0]
 
     assert waiting["active"] is True and "changes" not in waiting
     assert proposal["title"] == "Proposed changes: 1 file (+1 \u22121)"
@@ -721,7 +734,7 @@ def test_a_file_changed_while_waiting_is_not_overwritten(tmp_path, monkeypatch):
     client.post(f"/runs/{run['id']}/decision", json={"decision": "apply"})
     final = wait_until_finished(client, run["id"])
 
-    assert final["status"] == "failed" and "changed since the proposal" in final["error"]
+    assert final["status"] == "failed" and "changed since the snapshot" in final["error"]
     assert app_text(root) == "# I kept working\n" and "changes" not in final
 
 
@@ -821,7 +834,7 @@ def test_the_security_check_is_logged_before_the_diff_and_never_holds_a_secret(t
     event = [e for e in events if e["type"] == "check"][0]
     finding = json.loads(event["detail"])["findings"][0]
 
-    assert kinds == ["check", "proposal"] and event["role"] == "security"
+    assert kinds == ["proposal", "check", "proposal"] and event["role"] == "security"
     assert event["title"] == "Security checks: 1 high-risk finding"
     assert finding["code"] == "aws_key" and finding["severity"] == "high" and "AKIA****" in finding["excerpt"]
     assert AWS_KEY not in json.dumps(events)                  # the secret is nowhere in the stored log

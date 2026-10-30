@@ -14,8 +14,9 @@ tends to damage the parts it was not asked to touch.
 import json
 from dataclasses import dataclass
 
-from app.backend.agents.changes import ChangeError, ChangeSet
+from app.backend.agents.changes import ChangeError, ChangeSet, ScopeViolation
 from app.backend.agents.loop import ToolLoop
+from app.backend.agents.supervisor import StepFailed
 from app.backend.agents.workspace import WorkspaceError
 
 ACTIONS = ("list_files", "read_file", "search_files", "replace", "create", "finish")
@@ -210,5 +211,7 @@ class Editor(ToolLoop):
                 return label, self.changes.replace(action.get("path"), action.get("find"), action.get("replace")), True
 
             return label, self.changes.create(action.get("path"), action.get("content")), True
+        except ScopeViolation as exc:
+            raise StepFailed(str(exc)) from exc
         except (WorkspaceError, ChangeError) as exc:
             return label, f"Error: {exc}", False

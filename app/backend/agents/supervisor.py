@@ -340,6 +340,14 @@ class Supervisor:
         summary: str | None = None,
         error: str | None = None,
     ) -> RunResult:
+        for cleanup in reversed(self.state.pop("cleanups", [])):
+            try:
+                cleanup()
+            except Exception:
+                logger.exception("Could not clean up an isolated working copy")
+                self.emit("warning", "Working-copy cleanup failed",
+                          detail="Temporary files may remain in ORION's data/snapshots folder. "
+                                 "Close ORION before removing abandoned snapshots.")
         seconds = self.elapsed_ms() / 1000
         label = {"completed": "completed", "failed": "failed", "cancelled": "cancelled"}[status]
 
